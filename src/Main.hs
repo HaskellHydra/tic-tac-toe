@@ -26,8 +26,8 @@ module Main where
 
 import Control.Monad (void)
 import Data.ByteString.Char8 qualified as C
-import Data.Map (Map)
-import Data.Map qualified as Map
+-- import Data.Map (Map)
+-- import Data.Map qualified as Map
 import Data.Maybe (catMaybes)
 import Ledger (Address, dataHash ,Datum (Datum), DatumHash (..), ScriptContext, Validator, Value, getCardanoTxId)
 import Ledger 
@@ -41,7 +41,10 @@ import qualified PlutusTx         as PlutusTx
 import PlutusTx.Prelude hiding (pure, (<$>))
 import Prelude qualified as Haskell
 import           Text.Printf          (printf)
+-- import PlutusTx.Builtins
+import PlutusTx.AssocMap qualified as AssocMap
 
+type AMap = AssocMap.Map 
 
 data Game = Game
     { tFirstPlayer        :: !PaymentPubKeyHash
@@ -64,5 +67,15 @@ instance Eq GameChoice where
 
 PlutusTx.unstableMakeIsData ''GameChoice
 
-data GameDatum = GameDatum (Map [Haskell.Char] [Haskell.Char])
-    deriving Show
+data GameDatum = GameDatum (AMap BuiltinByteString BuiltinByteString)
+    deriving (Show, Haskell.Eq)
+
+instance Eq GameDatum where
+    {-# INLINABLE (==) #-}
+    GameDatum cs == GameDatum cs' = (cs == cs')
+
+PlutusTx.unstableMakeIsData ''GameDatum
+
+-- Init game
+-- y = (\x -> (("p"<> show x) <> ) <$> ((show) <$> [1..3] )) <$> [1..3]
+-- z = fromList $ zip (concat y) (Prelude.take 9 $ repeat "1")
