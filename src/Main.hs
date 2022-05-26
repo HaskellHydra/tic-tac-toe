@@ -16,12 +16,6 @@
 
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 
--- A game with two players. Player 1 thinks of a secret word
--- and uses its hash, and the game validator script, to lock
--- some funds (the prize) in a pay-to-script transaction output.
--- Player 2 guesses the word by attempting to spend the transaction
--- output. If the guess is correct, the validator script releases the funds.
--- If it isn't, the funds stay locked.
 module Main where
 
 import Control.Monad (void)
@@ -47,8 +41,8 @@ import PlutusTx.AssocMap qualified as AssocMap
 type AMap = AssocMap.Map 
 
 data Game = Game
-    { tFirstPlayer        :: !PaymentPubKeyHash
-    , tSecondPlayer       :: !PaymentPubKeyHash
+    { tFirstPlayer        :: !(BuiltinByteString, PaymentPubKeyHash)
+    , tSecondPlayer       :: !(BuiltinByteString, PaymentPubKeyHash)
     , tGameStake          :: !Integer
     , tDeadline           :: !POSIXTime
     , identifierToken     :: !AssetClass
@@ -76,6 +70,14 @@ instance Eq GameDatum where
 
 PlutusTx.unstableMakeIsData ''GameDatum
 
--- Init game
--- y = (\x -> (("p"<> show x) <> ) <$> ((show) <$> [1..3] )) <$> [1..3]
--- z = fromList $ zip (concat y) (Prelude.take 9 $ repeat "1")
+data GameRedeemer = Play GameChoice | ClaimFirst | ClaimSecond
+    deriving Show
+
+PlutusTx.unstableMakeIsData ''GameRedeemer
+
+{-# INLINABLE initDatum #-}
+initDatum :: GameDatum
+initDatum = GameDatum (AssocMap.fromList t)
+              where 
+                  y = (\x -> (("p" Haskell.<> Haskell.show x) <> ) Haskell.<$> ((Haskell.show) Haskell.<$> [1..3::Integer] )) Haskell.<$> [1..3::Integer]
+                  t = zip ((toBuiltin . C.pack) Haskell.<$> (concat y)) ((toBuiltin . C.pack) Haskell.<$> (Haskell.take 9 $ Haskell.repeat "1"))
