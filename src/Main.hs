@@ -50,18 +50,19 @@ data Game = Game
 
 PlutusTx.makeLift ''Game
 
-data GameChoice = X | O
+data GameChoice = X | O | N
     deriving (Show, Generic, FromJSON, ToJSON, ToSchema, Haskell.Eq, Haskell.Ord)
 
 instance Eq GameChoice where
     {-# INLINABLE (==) #-}
     X == X = True
     O == O = True
+    N == N = True
     _ == _ = False
 
 PlutusTx.unstableMakeIsData ''GameChoice
 
-data GameDatum = GameDatum (AMap BuiltinByteString BuiltinByteString)
+data GameDatum = GameDatum (AMap BuiltinByteString GameChoice) | NoDatum
     deriving (Show, Haskell.Eq)
 
 instance Eq GameDatum where
@@ -80,4 +81,12 @@ initDatum :: GameDatum
 initDatum = GameDatum (AssocMap.fromList t)
               where 
                   y = (\x -> (("p" Haskell.<> Haskell.show x) <> ) Haskell.<$> ((Haskell.show) Haskell.<$> [1..3::Integer] )) Haskell.<$> [1..3::Integer]
-                  t = zip ((toBuiltin . C.pack) Haskell.<$> (concat y)) ((toBuiltin . C.pack) Haskell.<$> (Haskell.take 9 $ Haskell.repeat "1"))
+                  t = zip ((toBuiltin . C.pack) Haskell.<$> (concat y)) (Haskell.take 9 $ Haskell.repeat N)
+
+{-# INLINABLE getDatumMap #-}
+getDatumMap :: GameDatum -> (AMap BuiltinByteString GameChoice)
+getDatumMap (GameDatum m) = m 
+
+{-# INLINABLE mkValidator #-}
+mkValidator :: Game -> GameDatum -> GameRedeemer -> ScriptContext -> Bool
+mkValidator game datum redeemer ctx = Haskell.undefined
