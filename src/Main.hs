@@ -14,7 +14,8 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving  #-}
 {-# LANGUAGE MultiParamTypeClasses  #-}
 {-# LANGUAGE NumericUnderscores #-}
-{-# LANGUAGE LambdaCase#-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE  RecordWildCards #-}
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 
 module Main where
@@ -28,6 +29,7 @@ import Data.Maybe (catMaybes)
 import Data.Default               (def, Default (..))
 import Ledger (Address, dataHash ,Datum (Datum), DatumHash (..), ScriptContext, Validator, Value, getCardanoTxId)
 import Ledger 
+import Ledger.Value as Value
 import Ledger.Ada qualified as Ada
 import Ledger.Constraints qualified as Constraints
 import Ledger.Tx (ChainIndexTxOut (..))
@@ -52,9 +54,12 @@ import System.IO
 
 type AMap = AssocMap.Map 
 
+minLovelace :: Integer
+minLovelace = 2_000_000
+
 data Game = Game
     { tFirstPlayer        :: !(BuiltinByteString, PaymentPubKeyHash)
-    , tSecondPlayer       :: !(BuiltinByteString, PaymentPubKeyHash)
+    , tSecondPlayer       :: !(Maybe (BuiltinByteString, PaymentPubKeyHash))
     , tGameStake          :: !Integer
     , tDeadline           :: !POSIXTime
     , identifierToken     :: !AssetClass
@@ -84,7 +89,7 @@ instance Eq GameChoice where
 PlutusTx.unstableMakeIsData ''GameChoice
 
 data GameState = GameState (AMap BuiltinByteString GameChoice)
-    deriving (Show, Haskell.Eq)
+    deriving (Show, Generic, ToJSON, FromJSON, Haskell.Eq)
 
 instance Eq GameState where
     {-# INLINABLE (==) #-}
@@ -167,11 +172,46 @@ validator = Scripts.validatorScript ticTacToeInstance
 gameAddress :: Address
 gameAddress = Ledger.scriptAddress (Scripts.validatorScript ticTacToeInstance)
 
-
+-- Start Game Params
+data StartParams = StartParams {
+    gFirstPlayerPkh      :: !PaymentPubKeyHash
+   ,gFirstPlayerMarker   :: !BuiltinByteString
+   ,gSecondPlayerPkh     :: !(Maybe PaymentPubKeyHash)
+   ,gSecondPlayerMarker  :: !(Maybe BuiltinByteString)
+   ,gStake               :: !Integer
+   ,gDeadline            :: !POSIXTime
+   ,gCurrency             :: !CurrencySymbol
+   ,gTokenName           :: !TokenName
+   ,gState               :: !GameState
+} deriving (Generic, ToJSON, FromJSON)
 
 -- | The schema of the contract, with one endpoint to publish the problem with a bounty and another to sbumit solutions
-type TicTacToeSchema = Endpoint "test" ()
+type TicTacToeSchema = Endpoint  "start" StartParams
+                       .\/ Endpoint "test" ()
 
+start :: AsContractError e => StartParams -> Contract w s e ()
+start StartParams{..} = do
+    logInfo @Haskell.String "---------------- Start Game -------------------------"  
+    pkh <- ownPaymentPubKeyHash
+    let g = Game
+              {
+                tFirstPlayer = (gFirstPlayerMarker, gFirstPlayerPkh)
+               ,tSecondPlayer = Nothing
+               ,tGameStake = gStake
+               ,tDeadline = gDeadline
+               ,identifierToken = AssetClass (gCurrency, gTokenName)
+              }       
+        d = GameDatum
+            {
+                gdGame = g
+               ,gdGameState = gState
+            }
+        v = Value.singleton gCurrency gTokenName 1 <> Ada.lovelaceValueOf minLovelace    
+        -- v = (Value.assetClassValue (Value.AssetClass (gCurrency, gTokenName)) 1) <> Ada.lovelaceValueOf minLovelace
+        tx = Constraints.mustPayToTheScript d v
+    ledgerTx <- submitTxConstraints ticTacToeInstance tx
+    void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
+    logInfo @Haskell.String $ printf "Started game with paramters %s and token %s" (Haskell.show g) (Haskell.show v)
 
 test :: forall w s e. AsContractError e => Contract w s e ()
 test = do
@@ -189,7 +229,7 @@ endpoints = awaitPromise (test') >> endpoints
   where
     test' = endpoint @"test" $ const test
 
-mkSchemaDefinitions ''TicTacToeSchema
+-- mkSchemaDefinitions ''TicTacToeSchema
 
 
 emulatorConfig :: Trace.EmulatorConfig
@@ -222,6 +262,12 @@ myTraceTest = do
     s <- Trace.waitNSlots 1
     Extras.logInfo $ "reached " ++ Haskell.show s
 
+
+currSymbol :: CurrencySymbol
+currSymbol = currencySymbol "dcddcaa"
+
+tName :: TokenName
+tName = tokenName "T1"
 
 test1 :: IO ()
 -- test1 = Trace.runEmulatorTraceIO' traceConfig emulatorConfig myTraceTest
