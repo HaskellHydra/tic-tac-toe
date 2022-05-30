@@ -210,12 +210,12 @@ start StartParams{..} = do
                 gdGame = g
                ,gdGameState = gState
             }
-        v = Value.singleton gCurrency gTokenName 1 <> Ada.lovelaceValueOf minLovelace    
+        v = (Value.singleton gCurrency gTokenName 1) <> (Ada.lovelaceValueOf minLovelace )
         -- v = (Value.assetClassValue (Value.AssetClass (gCurrency, gTokenName)) 1) <> Ada.lovelaceValueOf minLovelace
         tx = Constraints.mustPayToTheScript d v
     ledgerTx <- submitTxConstraints ticTacToeInstance tx
     void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
-    logInfo @Haskell.String $ printf "Started game with paramters %s and token %s" (Haskell.show g) (Haskell.show v)
+    logInfo @Haskell.String $ printf "Started game with paramters %s and token %s" (Haskell.show d) (Haskell.show v)
 
 test :: forall w s e. AsContractError e => Contract w s e ()
 test = do
@@ -239,10 +239,15 @@ endpoints = awaitPromise (start' `select` test') >> endpoints
 emulatorConfig :: Trace.EmulatorConfig
 emulatorConfig =
   Trace.EmulatorConfig
-    (Left $ Map.fromList [(knownWallet 1, Ada.lovelaceValueOf 30_000_000),
-                          (knownWallet 2, Ada.lovelaceValueOf 10_000_000)])
+    (Left $ Map.fromList [(knownWallet 1, v1),
+                          (knownWallet 2, v2)])
     def
     def
+      where
+        v1 :: Value
+        v1 = Ada.lovelaceValueOf 100_000_000 <> assetClassValue token 1 -- Initialize the wallet with 100Ada and the NFT token
+        v2 :: Value
+        v2 = Ada.lovelaceValueOf 100_000_000
 
 customShowEvent :: EmulatorEvent' -> Maybe Haskell.String
 customShowEvent = \case
@@ -263,10 +268,11 @@ myTraceTest = do
     h1 <- Trace.activateContractWallet (knownWallet 1) $ endpoints @ContractError
     h2 <- Trace.activateContractWallet (knownWallet 2) $ endpoints @ContractError
     Trace.callEndpoint @"test" h1 ()
-    s <- Trace.waitNSlots 1
-
+    -- s <- Trace.waitNSlots 1
+    void $ Trace.waitNSlots 1
     -- Second player has not joined the game yet.
-    Trace.callEndpoint @"start" h1 $ StartParams{
+    Trace.callEndpoint @"start" h1 $ StartParams
+      {
         gFirstPlayerPkh = mockWalletPaymentPubKeyHash (knownWallet 1)
        ,gFirstPlayerMarker = (BuiltinByteString Haskell.. C.pack) "X"
        ,gSecondPlayerPkh = Nothing -- mockWalletPaymentPubKeyHash (knownWallet 2)
@@ -276,7 +282,8 @@ myTraceTest = do
        ,gCurrency = currSymbol
        ,gTokenName = tName
        ,gState = initGameState
-    }
+      }
+    -- void $ Trace.waitNSlots 1    
     s <- Trace.waitNSlots 1
     Extras.logInfo $ "reached " ++ Haskell.show s
 
@@ -287,6 +294,10 @@ currSymbol = currencySymbol "dcddcaa"
 tName :: TokenName
 tName = tokenName "T1"
 
+-- Create a token of AssetClass to send it to the wallet
+token :: AssetClass
+token = AssetClass (currSymbol, tName)
+
 test1 :: IO ()
--- test1 = Trace.runEmulatorTraceIO' traceConfig emulatorConfig myTraceTest
-test1 = Trace.runEmulatorTraceIO' def def myTraceTest
+test1 = Trace.runEmulatorTraceIO' traceConfig emulatorConfig myTraceTest
+-- test1 = Trace.runEmulatorTraceIO' def def myTraceTest
