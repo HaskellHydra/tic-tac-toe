@@ -40,7 +40,9 @@ import qualified PlutusTx         as PlutusTx
 import PlutusTx.Prelude hiding (pure, (<$>))
 import Prelude qualified as Haskell
 import           Text.Printf          (printf)
--- import PlutusTx.Builtins
+import Ledger.TimeSlot
+
+-- Import Plutus Map
 import PlutusTx.AssocMap qualified as AssocMap
 
 -- Trace imports
@@ -51,6 +53,8 @@ import Wallet.Emulator.MultiAgent
 import Plutus.Trace.Emulator.Types
 import System.IO
 
+-- Builtins
+import           PlutusTx.Builtins.Internal (BuiltinString(..), BuiltinByteString (..), decodeUtf8)
 
 type AMap = AssocMap.Map 
 
@@ -223,14 +227,14 @@ test = do
     logInfo @Haskell.String $ Haskell.show $ Map.toList unspentOutputs
 
 
--- | Math bounty endpoints.
+-- | TicTacToe endpoints.
 endpoints :: forall  e. AsContractError e => Contract () TicTacToeSchema e ()
-endpoints = awaitPromise (test') >> endpoints
+endpoints = awaitPromise (start' `select` test') >> endpoints
   where
+    start' = endpoint @"start" start
     test' = endpoint @"test" $ const test
 
 -- mkSchemaDefinitions ''TicTacToeSchema
-
 
 emulatorConfig :: Trace.EmulatorConfig
 emulatorConfig =
@@ -259,6 +263,20 @@ myTraceTest = do
     h1 <- Trace.activateContractWallet (knownWallet 1) $ endpoints @ContractError
     h2 <- Trace.activateContractWallet (knownWallet 2) $ endpoints @ContractError
     Trace.callEndpoint @"test" h1 ()
+    s <- Trace.waitNSlots 1
+
+    -- Second player has not joined the game yet.
+    Trace.callEndpoint @"start" h1 $ StartParams{
+        gFirstPlayerPkh = mockWalletPaymentPubKeyHash (knownWallet 1)
+       ,gFirstPlayerMarker = (BuiltinByteString Haskell.. C.pack) "X"
+       ,gSecondPlayerPkh = Nothing -- mockWalletPaymentPubKeyHash (knownWallet 2)
+       ,gSecondPlayerMarker = Nothing -- (BuiltinByteString Haskell.. C.pack) "O"
+       ,gStake = 10_000_000
+       ,gDeadline = slotToBeginPOSIXTime def 10
+       ,gCurrency = currSymbol
+       ,gTokenName = tName
+       ,gState = initGameState
+    }
     s <- Trace.waitNSlots 1
     Extras.logInfo $ "reached " ++ Haskell.show s
 
