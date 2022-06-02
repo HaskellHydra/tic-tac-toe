@@ -115,13 +115,13 @@ data GameDatum = GameDatum {
 
 PlutusTx.unstableMakeIsData ''GameDatum
 
-data GameRedeemer = Play GameChoice | ClaimFirst | ClaimSecond
+data GameRedeemer = Play BuiltinByteString GameChoice | ClaimFirst | ClaimSecond
     deriving (Show, Generic, ToJSON, FromJSON, Haskell.Eq)
 
 instance Eq GameRedeemer where
     {-# INLINABLE (==) #-}
-    Play X == Play X = True
-    Play O == Play O = True
+    (Play s X) == (Play s' X) = ((X == X) && (s == s'))
+    (Play s O) == (Play s' O) = ((O == O) && (s == s'))
     ClaimFirst == ClaimFirst = True
     ClaimSecond == ClaimSecond = True
     _ == _ = False
@@ -176,7 +176,7 @@ mkValidator datum redeemer ctx = (traceIfFalse "Wrong game marker selection by t
 
         checkPlayerChoice :: Bool
         checkPlayerChoice = case redeemer of
-                              Play c -> if (c == X) then                                          
+                              Play _ c -> if (c == X) then                                          
                                           (txSignedBy info $ unPaymentPubKeyHash $ snd $ tFirstPlayer inGameCfg ) &&
                                           ( traceIfFalse "Player1 trying to tamper with the next move marker !" $ c /= (nextMove outGameCfg))
                                         else if ( c == O ) then
@@ -188,21 +188,6 @@ mkValidator datum redeemer ctx = (traceIfFalse "Wrong game marker selection by t
                                             traceError "Wrong game choice"
                               ClaimFirst -> True  -- TODO
                               ClaimSecond -> True -- TODO  
-
-    --    verifyNextMove :: Bool
-    --    verifyNextMove = case redeemer of
-    --                          Play c -> if (c == X) then                                          
-    --                                      (stringToBuiltinByteString "X") == (nextMove inGameCfg)
-    --                                    else if ( c == O ) then
-    --                                      case (tSecondPlayer inGameCfg) of
-    --                                        Nothing -> False 
-    --                                        Just x -> (txSignedBy info $ unPaymentPubKeyHash $ snd x )
-    --                                    else
-    --                                        traceError "Wrong game choice"
-    --                          ClaimFirst -> True  -- TODO
-    --                          ClaimSecond -> True -- TODO  
-
-
 
         -- checkCorrectDatum = 
         --   let inGameCfg = gdGame GameDatum
@@ -224,9 +209,6 @@ mkValidator datum redeemer ctx = (traceIfFalse "Wrong game marker selection by t
         ownInput = case (findOwnInput ctx) of
                     Nothing -> traceError "game input is missing"
                     Just x -> txInInfoResolved x
-
-        -- checkMinStake :: Bool
-        -- checkMinStake 
 
         -----------------------------------------
         -- TODO: In the below code check if 
@@ -346,7 +328,7 @@ mkMove MoveParams{..} = do
     logInfo @Haskell.String $ printf "Using the next move as : %s" (Haskell.show mNextMove)
     let modGameCfg = gdGame { nextMove = mNextMove}
         d' = d { gdGame = modGameCfg }
-        r = Redeemer $ PlutusTx.toBuiltinData $ Play X
+        r = Redeemer $ PlutusTx.toBuiltinData $ Play ((BuiltinByteString Haskell.. C.pack) "p11") X 
         v = (Value.singleton mCurrency mTokenName 1) <> (Ada.lovelaceValueOf mStake )
         -- explained here https://cardano.stackexchange.com/questions/2296/lecture-6-it-2-core-hs-explaining-lookups-use-of-both-typedvalidatorlook
         lookups = Constraints.typedValidatorLookups ticTacToeInstance Haskell.<> -- used for the output utxo with the new contract instance
@@ -466,13 +448,13 @@ myTraceTest = do
         ,mFirstPlayerMarker   = (BuiltinByteString Haskell.. C.pack) "X"
         ,mSecondPlayerPkh     = Nothing
         ,mSecondPlayerMarker  = Nothing
-        ,mNextMove            = X        
+        ,mNextMove            = O        
         ,mStake               = 10_000_000
         ,mCurrency            = currSymbol
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play O
+        ,mChoice              = Play ((BuiltinByteString Haskell.. C.pack) "p11") O
       }
     void $ Trace.waitNSlots 1
 
