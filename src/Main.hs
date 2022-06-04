@@ -81,7 +81,7 @@ data Game = Game
     { tFirstPlayer        :: !(BuiltinByteString, PaymentPubKeyHash)
     , tSecondPlayer       :: !(Maybe (BuiltinByteString, PaymentPubKeyHash))
     , tGameStake          :: !Integer
-    , tMinGameStake       :: !Integer
+    , tMinGameStake       :: !Integer -- This value can be hardcoded
     , tDeadline           :: !POSIXTime
     , identifierToken     :: !AssetClass
     , nextMove            :: !GameChoice -- keep track of the next move
@@ -153,9 +153,11 @@ getGameStateMap (GameState m) = m
 
 {-# INLINABLE mkValidator #-}
 mkValidator :: GameDatum -> GameRedeemer -> ScriptContext -> Bool
-mkValidator datum redeemer ctx = (traceIfFalse "Wrong game marker selection by the player" evalGameTx ) &&
-                                 (traceIfFalse "Deadline expired! (or) Unable to extract datum" checkDeadline) &&
-                                 (traceIfFalse "Wrong Datum" checkCorrectDatum)                                
+mkValidator datum redeemer ctx = (traceIfFalse "Deadline expired! (or) Unable to extract datum" checkDeadline) &&
+                                 (traceIfFalse "Wrong game marker selection by the player" evalGameTx ) &&
+                                 (traceIfFalse "Player stake does not match" checkGameStake) &&
+                                 (traceIfFalse "Wrong Datum" checkCorrectDatum) &&
+                                 checkMinStake   -- TODO is the minstake is not met give the first player a chance to reclaim the funds from the script                      
     where
         checkDeadline :: Bool
         checkDeadline = contains (to $ tDeadline $ gdGame datum) (txInfoValidRange $ scriptContextTxInfo ctx)
@@ -169,14 +171,9 @@ mkValidator datum redeemer ctx = (traceIfFalse "Wrong game marker selection by t
             Play loc c -> checkPlayerChoice c
             ClaimFirst -> True -- TODO
             ClaimSecond -> True --TODO
+            _ -> False
 
                               
-        inGameCfg :: Game
-        inGameCfg = gdGame datum
-
-        outGameCfg :: Game
-        outGameCfg = gdGame outputDatum
-
         checkPlayerChoice :: GameChoice -> Bool
         checkPlayerChoice c =  if (c == X) then
                                 ( traceIfFalse "Not signed by Player1" $ txSignedBy info $ unPaymentPubKeyHash $ snd $ tFirstPlayer inGameCfg ) && 
@@ -191,8 +188,41 @@ mkValidator datum redeemer ctx = (traceIfFalse "Wrong game marker selection by t
                               else
                                   traceError "Wrong game choice"
 
+---------------------------------------------------------------------------------------------------------------------------------
+-- Use this function (Ada.getLovelace . Ada.fromValue) to get only the ADA/lovelaces [check the deifinition for 'lovelaces']
+-- Prelude Ledger Value Ada Main> (Ada.getLovelace . Ada.fromValue) (Ada.lovelaceValueOf 100_000_000 <> assetClassValue token 1)
+-- 100000000
+-- Prelude Ledger Value Ada Main> (Ada.fromValue) (Ada.lovelaceValueOf 100_000_000 <> assetClassValue token 1)
+-- Lovelace {getLovelace = 100000000} 
+---------------------------------------------------------------------------------------------------------------------------------
+
+        checkGameStake :: Bool
+        checkGameStake = case ( tSecondPlayer inGameCfg, tSecondPlayer outGameCfg ) of
+            -- When a second player joins a game we need to verify if the player meets the minimum stake
+            -- and the output TX has a 2*gamestake, In this casse the TX will be signed by the player2 
+                            (Nothing, Just (_, ppkh2)) -> 
+                                (traceIfFalse "Not signed by player2" $ txSignedBy info $ unPaymentPubKeyHash ppkh2) &&
+                                (traceIfFalse "The second player stake does not match" $ (lovelaces $ txOutValue ownOutput) == 2*(tGameStake outGameCfg) )
+            -- In this case only the 1stPlayer stake exists in the script and the second Player has not joined the game yet
+            -- This case is not hit, since there is a check to prevent a double move by a player
+                            (Nothing, Nothing) -> 
+                                (traceIfFalse "Not signed by player1" $ txSignedBy info $ unPaymentPubKeyHash $ snd $ tFirstPlayer outGameCfg ) &&
+                                (traceIfTrue "In checkGameStake" True) &&                               
+                                (traceIfFalse "The First player stake does not match" $ (lovelaces $ txOutValue ownOutput) == (tGameStake outGameCfg) )
+            -- Prevent players from stealing the game stake in the script 
+                            (Just _, Just (_, ppkh2)) -> 
+                                (traceIfFalse 
+                                "Not signed by any of the players participating in the game" 
+                                $ (txSignedBy info $ unPaymentPubKeyHash $ snd $ tFirstPlayer outGameCfg) || (txSignedBy info $ unPaymentPubKeyHash ppkh2) ) &&
+                                (traceIfFalse "The player stake does not match [Game started with both stakes]" $ (lovelaces $ txOutValue ownOutput) == 2*(tGameStake outGameCfg) )
+
+                            (_, _) -> (traceIfFalse "Unknown stake parameters " False) 
+
+        checkMinStake :: Bool
+        checkMinStake = traceIfFalse "Min game stake not met!!" $ (tGameStake outGameCfg) >= minGameStake                           
+
         -- The following fields - tSecondPlayer, nextMove keep changing
-        -- but the second player config will change from Nothing to Just (location, ppkh)after making the first move 
+        -- and the second player config will change from Nothing to Just (location, ppkh) after making the first move 
         -- Note: The parameters that do not change can be made as parameters to the contract and must be sperated 
         --       from the datum fields that change for easier comparison
         checkCorrectDatum :: Bool
@@ -202,14 +232,31 @@ mkValidator datum redeemer ctx = (traceIfFalse "Wrong game marker selection by t
                                 ((tGameStake inGameCfg) == (tGameStake outGameCfg)) &&
                                 ((tMinGameStake inGameCfg) == (tMinGameStake outGameCfg)) &&
                                 ((tDeadline inGameCfg)==(tDeadline outGameCfg)) &&
-                                ((identifierToken inGameCfg)==(identifierToken outGameCfg)) 
+                                ((identifierToken inGameCfg)==(identifierToken outGameCfg)) &&
+                                (((nextMove inGameCfg) == X) || ((nextMove inGameCfg) == O) ) &&
+                                (((nextMove outGameCfg) == X) || ((nextMove outGameCfg) == O) ) 
+
                 (Just x, Just y) -> ((tFirstPlayer inGameCfg) == (tFirstPlayer outGameCfg)) &&
                                     ((tGameStake inGameCfg) == (tGameStake outGameCfg)) &&
                                     ((tMinGameStake inGameCfg) == (tMinGameStake outGameCfg)) &&
                                     ((tDeadline inGameCfg)==(tDeadline outGameCfg)) &&
                                     ((identifierToken inGameCfg)==(identifierToken outGameCfg)) &&
+                                    (((nextMove inGameCfg) == X) || ((nextMove inGameCfg) == O) ) &&
+                                    (((nextMove outGameCfg) == X) || ((nextMove outGameCfg) == O) ) &&                                    
                                     (x == y)
                 (_, _)       -> False         
+
+        ------------------------
+        -- TX helper functions
+        ------------------------
+
+        --TODO implement a function to check only '1' script input
+
+        inGameCfg :: Game
+        inGameCfg = gdGame datum
+
+        outGameCfg :: Game
+        outGameCfg = gdGame outputDatum
 
                        
         info :: TxInfo    
@@ -237,6 +284,12 @@ mkValidator datum redeemer ctx = (traceIfFalse "Wrong game marker selection by t
                         Just ad' -> (o, ad')
                         Nothing  -> traceError "error decoding data"
             _   -> traceError "expected exactly one continuing output"
+
+        -- TODO ownOutput ppkh
+        ownOutputPpkh :: Maybe PaymentPubKeyHash
+        ownOutputPpkh =  PaymentPubKeyHash Haskell.<$> (toPubKeyHash $ txOutAddress ownOutput)
+
+
 
 -- | Datum and redeemer parameter types
 data TicTacToe
@@ -299,6 +352,7 @@ data MoveParams = MoveParams {
 -- | The schema of the contract, with one endpoint to publish the problem with a bounty and another to sbumit solutions
 type TicTacToeSchema = Endpoint  "start" StartParams
                        .\/ Endpoint "move" MoveParams
+                       .\/ Endpoint "move2" MoveParams
                        .\/ Endpoint "test" ()
 
 start :: AsContractError e => StartParams -> Contract w s e ()
@@ -359,6 +413,36 @@ mkMove MoveParams{..} = do
     ledgerTx <- submitTxConstraintsWith lookups tx
     void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
 
+mkMoveV2 :: MoveParams -> Contract w s Text ()
+mkMoveV2 MoveParams{..} = do
+    logInfo @Haskell.String "-------------- Make a Move ---------------"
+    (oref, o, d@GameDatum{..}) <- findGameDatum mCurrency mTokenName
+    logInfo @Haskell.String $ printf "Datum from findDatum %s" (Haskell.show $ d)
+    logInfo @Haskell.String $ printf "Using the next move as : %s" (Haskell.show mNextMove)
+    let d' = buildDatum
+          where buildDatum = case (mSecondPlayerMarker, mSecondPlayerPkh) of
+                         
+                         (Just mSndPlayerMarker, Just mSndPlayerPkh) -> d { 
+                           gdGame = gdGame { nextMove = mNextMove
+                           ,tSecondPlayer = Just (mSndPlayerMarker,mSndPlayerPkh)} }
+
+                         (_, _) -> d { gdGame = gdGame { nextMove = mNextMove} }
+
+        r = Redeemer $ PlutusTx.toBuiltinData mChoice 
+        v = (Value.singleton mCurrency mTokenName 1) <> (Ada.lovelaceValueOf mStake ) <> (Ada.lovelaceValueOf mStake )
+        -- explained here https://cardano.stackexchange.com/questions/2296/lecture-6-it-2-core-hs-explaining-lookups-use-of-both-typedvalidatorlook
+        lookups = Constraints.typedValidatorLookups ticTacToeInstance Haskell.<> -- used for the output utxo with the new contract instance
+                  Constraints.otherScript validator                   Haskell.<> -- used for consuming the input contract instance
+                  Constraints.unspentOutputs (Map.singleton oref o)
+        tx = Constraints.mustPayToTheScript d' v                            <>
+             Constraints.mustValidateIn (to $ tDeadline gdGame)          <>
+             Constraints.mustSpendScriptOutput oref r
+          
+    logInfo @Haskell.String $ printf "Modified Datum : %s" (Haskell.show d')    
+    ledgerTx <- submitTxConstraintsWith lookups tx
+    void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
+
+
 
 findGameDatum :: CurrencySymbol -> TokenName -> Contract w s Text (TxOutRef, ChainIndexTxOut, GameDatum)
 findGameDatum cs tn = do
@@ -394,10 +478,11 @@ test = do
 
 -- | TicTacToe endpoints.
 endpoints :: Contract () TicTacToeSchema Text ()
-endpoints = awaitPromise (start' `select` move' `select` test') >> endpoints
+endpoints = awaitPromise (start' `select` move' `select` move2' `select` test') >> endpoints
   where
     start' = endpoint @"start" start
     move' = endpoint @"move" mkMove
+    move2' = endpoint @"move2" mkMoveV2
     test' = endpoint @"test" $ const test
 
 -- mkSchemaDefinitions ''TicTacToeSchema
@@ -447,7 +532,7 @@ myTraceTest = do
        ,gSecondPlayerMarker = Nothing -- (BuiltinByteString Haskell.. C.pack) "O"
        ,gNextMove = O
        ,gMinGameStake = minGameStake
-       ,gStake = 10_000_000
+       ,gStake = 5_000_000
        ,gDeadline = slotToBeginPOSIXTime def 10
        ,gCurrency = currSymbol
        ,gTokenName = tName
@@ -460,14 +545,31 @@ myTraceTest = do
     Trace.callEndpoint @"test" h1 ()
     void $ Trace.waitNSlots 1
 
-    Trace.callEndpoint @"move" h1 $ MoveParams
+    -- Make a move second player with stake
+    Trace.callEndpoint @"move2" h2 $ MoveParams
+      {
+         mFirstPlayerPkh      = mockWalletPaymentPubKeyHash (knownWallet 1)
+        ,mFirstPlayerMarker   = (BuiltinByteString Haskell.. C.pack) "X"
+        ,mSecondPlayerPkh     = Just $ mockWalletPaymentPubKeyHash (knownWallet 2)
+        ,mSecondPlayerMarker  = Just $ (BuiltinByteString Haskell.. C.pack) "O"
+        ,mNextMove            = X        
+        ,mStake               = 5_000_000
+        ,mCurrency            = currSymbol
+        ,mTokenName           = tName
+        ,mState               = initGameState
+        ,mMinGameStake        = minGameStake 
+        ,mChoice              = Play ((BuiltinByteString Haskell.. C.pack) "p12") O
+      }
+    void $ Trace.waitNSlots 1
+
+    Trace.callEndpoint @"move2" h1 $ MoveParams
       {
          mFirstPlayerPkh      = mockWalletPaymentPubKeyHash (knownWallet 1)
         ,mFirstPlayerMarker   = (BuiltinByteString Haskell.. C.pack) "X"
         ,mSecondPlayerPkh     = Nothing
         ,mSecondPlayerMarker  = Nothing
         ,mNextMove            = O        
-        ,mStake               = 10_000_000
+        ,mStake               = 5_000_000
         ,mCurrency            = currSymbol
         ,mTokenName           = tName
         ,mState               = initGameState
@@ -476,20 +578,7 @@ myTraceTest = do
       }
     void $ Trace.waitNSlots 1
 
-    Trace.callEndpoint @"move" h2 $ MoveParams
-      {
-         mFirstPlayerPkh      = mockWalletPaymentPubKeyHash (knownWallet 1)
-        ,mFirstPlayerMarker   = (BuiltinByteString Haskell.. C.pack) "X"
-        ,mSecondPlayerPkh     = Just $ mockWalletPaymentPubKeyHash (knownWallet 2)
-        ,mSecondPlayerMarker  = Just $ (BuiltinByteString Haskell.. C.pack) "O"
-        ,mNextMove            = X        
-        ,mStake               = 10_000_000
-        ,mCurrency            = currSymbol
-        ,mTokenName           = tName
-        ,mState               = initGameState
-        ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play ((BuiltinByteString Haskell.. C.pack) "p12") O
-      }
+    Trace.callEndpoint @"test" h2 ()
     void $ Trace.waitNSlots 1
 
 currSymbol :: CurrencySymbol
