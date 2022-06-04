@@ -139,6 +139,32 @@ str2GameChoice x
 lovelaces :: Value -> Integer
 lovelaces = Ada.getLovelace . Ada.fromValue
 
+{-# INLINABLE extractDigits #-}
+extractDigits :: Integer -> Integer -> Maybe Integer
+extractDigits x p | (p==1) = Just (snd $ divMod x 10)
+                  | (p==9) = Just (Haskell.div x 100_000_000)
+                  | (p==8) = Just ( snd $ divMod (Haskell.div x 10_000_000) 10)
+                  | (p==7) = Just ( snd $ divMod (Haskell.div x 1_000_000) 10)
+                  | (p==6) = Just ( snd $ divMod (Haskell.div x 100_000) 10)
+                  | (p==5) = Just ( snd $ divMod (Haskell.div x 10_000) 10)
+                  | (p==4) = Just ( snd $ divMod (Haskell.div x 1_000) 10)
+                  | (p==3) = Just ( snd $ divMod (Haskell.div x 100) 10)
+                  | (p==2) = Just ( snd $ divMod (Haskell.div x 10) 10)                  
+                  | otherwise = Nothing
+
+{-# INLINABLE replaceDigits #-}
+replaceDigits :: Integer -> Integer -> Integer -> Maybe Integer
+replaceDigits x p n | (p == 1) =  (\z -> n + (x - z) ) Haskell.<$> (extractDigits x p)
+                    | (p == 9) =  (\z -> (n*100_000_000) + (x - (z*100_000_000)) ) Haskell.<$> (extractDigits x p)
+                    | (p == 8) =  (\z -> (n*10_000_000) + (x - (z*10_000_000)) ) Haskell.<$> (extractDigits x p)
+                    | (p == 7) =  (\z -> (n*1_000_000) + (x - (z*1_000_000)) ) Haskell.<$> (extractDigits x p)
+                    | (p == 6) =  (\z -> (n*100_000) + (x - (z*100_000)) ) Haskell.<$> (extractDigits x p)
+                    | (p == 5) =  (\z -> (n*10_000) + (x - (z*10_000)) ) Haskell.<$> (extractDigits x p)
+                    | (p == 4) =  (\z -> (n*1_000) + (x - (z*1_000)) ) Haskell.<$> (extractDigits x p)
+                    | (p == 3) =  (\z -> (n*100) + (x - (z*100)) ) Haskell.<$> (extractDigits x p)
+                    | (p == 2) =  (\z -> (n*10) + (x - (z*10)) ) Haskell.<$> (extractDigits x p)
+                    | otherwise = Nothing
+
 {-# INLINABLE initGameState #-}
 initGameState :: GameState
 initGameState = GameState (AssocMap.fromList t)
