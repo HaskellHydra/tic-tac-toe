@@ -98,7 +98,7 @@ instance Eq Game where
 
 PlutusTx.unstableMakeIsData ''Game
 
-data GameState = GameState (AMap BuiltinByteString GameChoice)
+data GameState = GameState Integer
     deriving (Show, Generic, ToJSON, FromJSON, Haskell.Eq)
 
 instance Eq GameState where
@@ -115,7 +115,7 @@ data GameDatum = GameDatum {
 
 PlutusTx.unstableMakeIsData ''GameDatum
 
-data GameRedeemer = Play BuiltinByteString GameChoice | ClaimFirst | ClaimSecond
+data GameRedeemer = Play Integer GameChoice | ClaimFirst | ClaimSecond
     deriving (Show, Generic, ToJSON, FromJSON, Haskell.Eq)
 
 instance Eq GameRedeemer where
@@ -167,14 +167,16 @@ replaceDigits x p n | (p == 1) =  (\z -> n + (x - z) ) Haskell.<$> (extractDigit
 
 {-# INLINABLE initGameState #-}
 initGameState :: GameState
-initGameState = GameState (AssocMap.fromList t)
-              where 
-                  y = (\x -> (("p" Haskell.<> Haskell.show x) <> ) Haskell.<$> ((Haskell.show) Haskell.<$> [1..3::Integer] )) Haskell.<$> [1..3::Integer]
-                  t = zip ((toBuiltin . C.pack) Haskell.<$> (concat y)) (Haskell.take 9 $ Haskell.repeat N)
+initGameState = GameState 555_555_555
 
-{-# INLINABLE getGameStateMap #-}
-getGameStateMap :: GameState -> (AMap BuiltinByteString GameChoice)
-getGameStateMap (GameState m) = m 
+-- initGameState = GameState (AssocMap.fromList t)
+--               where 
+--                   y = (\x -> (("p" Haskell.<> Haskell.show x) <> ) Haskell.<$> ((Haskell.show) Haskell.<$> [1..3::Integer] )) Haskell.<$> [1..3::Integer]
+--                   t = zip ((toBuiltin . C.pack) Haskell.<$> (concat y)) (Haskell.take 9 $ Haskell.repeat N)
+
+-- {-# INLINABLE getGameStateMap #-}
+-- getGameStateMap :: GameState -> (AMap BuiltinByteString GameChoice)
+-- getGameStateMap (GameState m) = m 
 
 
 {-# INLINABLE mkValidator #-}
@@ -558,7 +560,7 @@ myTraceTest = do
        ,gSecondPlayerMarker = Nothing -- (BuiltinByteString Haskell.. C.pack) "O"
        ,gNextMove = O
        ,gMinGameStake = minGameStake
-       ,gStake = 5_000_000
+       ,gStake = 10_000_000
        ,gDeadline = slotToBeginPOSIXTime def 10
        ,gCurrency = currSymbol
        ,gTokenName = tName
@@ -579,12 +581,12 @@ myTraceTest = do
         ,mSecondPlayerPkh     = Just $ mockWalletPaymentPubKeyHash (knownWallet 2)
         ,mSecondPlayerMarker  = Just $ (BuiltinByteString Haskell.. C.pack) "O"
         ,mNextMove            = X        
-        ,mStake               = 5_000_000
+        ,mStake               = 10_000_000
         ,mCurrency            = currSymbol
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play ((BuiltinByteString Haskell.. C.pack) "p12") O
+        ,mChoice              = Play (fromJust $ convLocations2Num "p11") O -- TODO map the poinst p11,p12,.... to positions
       }
     void $ Trace.waitNSlots 1
 
@@ -595,17 +597,33 @@ myTraceTest = do
         ,mSecondPlayerPkh     = Nothing
         ,mSecondPlayerMarker  = Nothing
         ,mNextMove            = O        
-        ,mStake               = 5_000_000
+        ,mStake               = 10_000_000
         ,mCurrency            = currSymbol
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play ((BuiltinByteString Haskell.. C.pack) "p11") X
+        ,mChoice              = Play (fromJust $ convLocations2Num "p12") X
       }
     void $ Trace.waitNSlots 1
 
     Trace.callEndpoint @"test" h2 ()
     void $ Trace.waitNSlots 1
+
+-- ---------->
+-- R1  R2  R3
+-- 555_555_555
+
+convLocations2Num :: Haskell.String -> Maybe Integer
+convLocations2Num loc = Map.lookup loc mapLoc
+    where mapLoc = Map.fromList[ ("p11",9),
+                    ("p12",8), 
+                    ("p13",7),
+                    ("p21",6), 
+                    ("p22",5),
+                    ("p23",4), 
+                    ("p31",3),
+                    ("p32",2), 
+                    ("p33",1)] 
 
 currSymbol :: CurrencySymbol
 currSymbol = currencySymbol "dcddcaa"
