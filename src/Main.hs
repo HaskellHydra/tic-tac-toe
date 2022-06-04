@@ -153,8 +153,9 @@ getGameStateMap (GameState m) = m
 
 {-# INLINABLE mkValidator #-}
 mkValidator :: GameDatum -> GameRedeemer -> ScriptContext -> Bool
-mkValidator datum redeemer ctx = (traceIfFalse "Wrong game marker selection by the player" checkPlayerChoice ) &&
-                                 (traceIfFalse "Deadline expired! (or) Unable to extract datum" checkDeadline)                                 
+mkValidator datum redeemer ctx = (traceIfFalse "Wrong game marker selection by the player" evalGameTx ) &&
+                                 (traceIfFalse "Deadline expired! (or) Unable to extract datum" checkDeadline) &&
+                                 (traceIfFalse "Wrong Datum" checkCorrectDatum)                                
     where
         checkDeadline :: Bool
         checkDeadline = contains (to $ tDeadline $ gdGame datum) (txInfoValidRange $ scriptContextTxInfo ctx)
@@ -163,9 +164,12 @@ mkValidator datum redeemer ctx = (traceIfFalse "Wrong game marker selection by t
         -- If the second player is nothing both in input and output datums then player 2 did not join the game
           -- The game stake is only 1* gamestake      
 
-        -- evalGameTx :: Bool
-        -- evalGameTx = case (datum , redeemer) of
-        --                (( GameDatum gdGame gdGameState), (Play xy c)) ->
+        evalGameTx :: Bool
+        evalGameTx = case redeemer of
+            Play loc c -> checkPlayerChoice c
+            ClaimFirst -> True -- TODO
+            ClaimSecond -> True --TODO
+
                               
         inGameCfg :: Game
         inGameCfg = gdGame datum
@@ -173,36 +177,40 @@ mkValidator datum redeemer ctx = (traceIfFalse "Wrong game marker selection by t
         outGameCfg :: Game
         outGameCfg = gdGame outputDatum
 
-        checkPlayerChoice :: Bool
-        checkPlayerChoice = case redeemer of
-                              Play _ c -> if (c == X) then
-                                          ( traceIfFalse "Not signed by Player1" $ txSignedBy info $ unPaymentPubKeyHash $ snd $ tFirstPlayer inGameCfg ) && 
-                                          ( traceIfFalse "Player1 trying to tamper with the next move marker !" $ c /= (nextMove outGameCfg)) &&
-                                          ( traceIfFalse "Player is making a double move" $ c == (nextMove inGameCfg) )
-                                        else if ( c == O ) then
-                                          case (tSecondPlayer outGameCfg) of
-                                            Nothing -> False 
-                                            Just x -> ( traceIfFalse "Not signed by Player2" $ txSignedBy info $ unPaymentPubKeyHash $ snd x ) &&                                                       
-                                                      ( traceIfFalse "Player2 trying to tamper with the next move marker !" $ c /= (nextMove outGameCfg)) &&
-                                                      ( traceIfFalse "Player is making a double move" $ c == (nextMove inGameCfg) )
-                                        else
-                                            traceError "Wrong game choice"
-                              ClaimFirst -> True  -- TODO
-                              ClaimSecond -> True -- TODO  
+        checkPlayerChoice :: GameChoice -> Bool
+        checkPlayerChoice c =  if (c == X) then
+                                ( traceIfFalse "Not signed by Player1" $ txSignedBy info $ unPaymentPubKeyHash $ snd $ tFirstPlayer inGameCfg ) && 
+                                ( traceIfFalse "Player1 trying to tamper with the next move marker !" $ c /= (nextMove outGameCfg)) &&
+                                ( traceIfFalse "Player is making a double move" $ c == (nextMove inGameCfg) )
+                              else if ( c == O ) then
+                                case (tSecondPlayer outGameCfg) of
+                                  Nothing -> False 
+                                  Just x -> ( traceIfFalse "Not signed by Player2" $ txSignedBy info $ unPaymentPubKeyHash $ snd x ) &&                                                       
+                                            ( traceIfFalse "Player2 trying to tamper with the next move marker !" $ c /= (nextMove outGameCfg)) &&
+                                            ( traceIfFalse "Player is making a double move" $ c == (nextMove inGameCfg) )
+                              else
+                                  traceError "Wrong game choice"
 
+        -- The following fields - tSecondPlayer, nextMove keep changing
+        -- but the second player config will change from Nothing to Just (location, ppkh)after making the first move 
+        -- Note: The parameters that do not change can be made as parameters to the contract and must be sperated 
+        --       from the datum fields that change for easier comparison
+        checkCorrectDatum :: Bool
+        checkCorrectDatum = 
+            case ( tSecondPlayer inGameCfg, tSecondPlayer outGameCfg ) of
+                (Nothing, _) -> ((tFirstPlayer inGameCfg) == (tFirstPlayer outGameCfg)) &&
+                                ((tGameStake inGameCfg) == (tGameStake outGameCfg)) &&
+                                ((tMinGameStake inGameCfg) == (tMinGameStake outGameCfg)) &&
+                                ((tDeadline inGameCfg)==(tDeadline outGameCfg)) &&
+                                ((identifierToken inGameCfg)==(identifierToken outGameCfg)) 
+                (Just x, Just y) -> ((tFirstPlayer inGameCfg) == (tFirstPlayer outGameCfg)) &&
+                                    ((tGameStake inGameCfg) == (tGameStake outGameCfg)) &&
+                                    ((tMinGameStake inGameCfg) == (tMinGameStake outGameCfg)) &&
+                                    ((tDeadline inGameCfg)==(tDeadline outGameCfg)) &&
+                                    ((identifierToken inGameCfg)==(identifierToken outGameCfg)) &&
+                                    (x == y)
+                (_, _)       -> False         
 
-        -- checkCorrectDatum = 
-        --   let inGameCfg = gdGame GameDatum
-        --       outGameCfg = gdGame outputDatum in
-        --     case ( tSecondPlayer inGameCfg ) of
-        --       Nothing -> if (( tSecondPlayer inGameCfg ) /= (tSecondPlayer outGameCfg)) then
-        --                  (( lovelaces $ txOutValue ownInput) == gStake) && 
-        --                  ((lovelaces $ txOutValue ownInput) >= minGameStake)
-        --                  else
-        --                    (( lovelaces $ txOutValue ownInput) == gStake) && 
-        --                    (( lovelaces $ txOutValue ownOutput) == 2*gStake) &&
-        --                    ((lovelaces $ txOutValue ownInput) >= minGameStake)
-        --       Just x -> True 
                        
         info :: TxInfo    
         info = scriptContextTxInfo ctx
