@@ -164,6 +164,25 @@ replaceDigits x p n | (p == 1) =  (\z -> n + (x - z) ) Haskell.<$> (extractDigit
                     | (p == 3) =  (\z -> (n*100) + (x - (z*100)) ) Haskell.<$> (extractDigits x p)
                     | (p == 2) =  (\z -> (n*10) + (x - (z*10)) ) Haskell.<$> (extractDigits x p)
                     | otherwise = Nothing
+-- ---------->
+-- R1  R2  R3
+-- 555_555_555
+-- j = [ extractDigits x i | i<- reverse [1..9]]
+
+{-# INLINABLE transposeGrid #-}
+transposeGrid :: [Maybe Integer]-> [Maybe Integer]
+transposeGrid j = foldr (\x y -> (getCol x j) <> y ) []  [0..2]
+                  where
+                    getCol :: Integer -> [Maybe Integer] -> [Maybe Integer]
+                    getCol c k = foldr (\p z -> (take 1 $ Haskell.drop (Haskell.fromIntegral $ c+p) k) <>z) []  [0,3,6] 
+
+{-# INLINABLE checkRowsM #-}
+checkRowsM :: [Maybe Integer] -> Integer -> Bool
+checkRowsM j c = foldl (\x y -> x || y) False [chkRow (i) j | i <- [0,3,6]]
+                  where
+                    chkRow :: Haskell.Int -> [Maybe Integer] -> Bool
+                    chkRow r j = foldr (\x z-> (x==c) && z) True (Data.Maybe.catMaybes $ take 3 $ Haskell.drop r j)
+
 
 {-# INLINABLE initGameState #-}
 initGameState :: GameState
@@ -203,7 +222,6 @@ mkValidator datum redeemer ctx = (traceIfFalse "Deadline expired! (or) Unable to
             ClaimFirst -> True -- TODO
             ClaimSecond -> True --TODO
             _ -> False
-
                               
         checkPlayerChoice :: GameChoice -> Bool
         checkPlayerChoice c =  if (c == X) then
@@ -343,7 +361,6 @@ mkValidator datum redeemer ctx = (traceIfFalse "Deadline expired! (or) Unable to
         -- TODO ownOutput ppkh
         ownOutputPpkh :: Maybe PaymentPubKeyHash
         ownOutputPpkh =  PaymentPubKeyHash Haskell.<$> (toPubKeyHash $ txOutAddress ownOutput)
-
 
 
 -- | Datum and redeemer parameter types
