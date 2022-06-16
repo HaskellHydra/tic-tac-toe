@@ -128,78 +128,82 @@ instance Eq GameRedeemer where
 
 PlutusTx.unstableMakeIsData ''GameRedeemer
 
--- {-# INLINABLE str2GameChoice #-}
--- str2GameChoice :: BuiltinByteString -> Maybe GameChoice
--- str2GameChoice x 
---                 | (x == (BuiltinByteString Haskell.. C.pack) "X") = Just X
---                 | (x == (BuiltinByteString Haskell.. C.pack) "O") = Just O
---                 | otherwise = Nothing
-
 {-# INLINABLE lovelaces #-}
 lovelaces :: Value -> Integer
 lovelaces = Ada.getLovelace . Ada.fromValue
 
 {-# INLINABLE extractDigits #-}
-extractDigits :: Integer -> Integer -> Maybe Integer
-extractDigits x p | (p==1) = Just (snd $ divMod x 10)
-                  | (p==9) = Just (Haskell.div x 100_000_000)
-                  | (p==8) = Just ( snd $ divMod (Haskell.div x 10_000_000) 10)
-                  | (p==7) = Just ( snd $ divMod (Haskell.div x 1_000_000) 10)
-                  | (p==6) = Just ( snd $ divMod (Haskell.div x 100_000) 10)
-                  | (p==5) = Just ( snd $ divMod (Haskell.div x 10_000) 10)
-                  | (p==4) = Just ( snd $ divMod (Haskell.div x 1_000) 10)
-                  | (p==3) = Just ( snd $ divMod (Haskell.div x 100) 10)
-                  | (p==2) = Just ( snd $ divMod (Haskell.div x 10) 10)                  
-                  | otherwise = Nothing
-
-{-# INLINABLE replaceDigits #-}
-replaceDigits :: Integer -> Integer -> Integer -> Maybe Integer
-replaceDigits x p n | (p == 1) =  (\z -> n + (x - z) ) Haskell.<$> (extractDigits x p)
-                    | (p == 9) =  (\z -> (n*100_000_000) + (x - (z*100_000_000)) ) Haskell.<$> (extractDigits x p)
-                    | (p == 8) =  (\z -> (n*10_000_000) + (x - (z*10_000_000)) ) Haskell.<$> (extractDigits x p)
-                    | (p == 7) =  (\z -> (n*1_000_000) + (x - (z*1_000_000)) ) Haskell.<$> (extractDigits x p)
-                    | (p == 6) =  (\z -> (n*100_000) + (x - (z*100_000)) ) Haskell.<$> (extractDigits x p)
-                    | (p == 5) =  (\z -> (n*10_000) + (x - (z*10_000)) ) Haskell.<$> (extractDigits x p)
-                    | (p == 4) =  (\z -> (n*1_000) + (x - (z*1_000)) ) Haskell.<$> (extractDigits x p)
-                    | (p == 3) =  (\z -> (n*100) + (x - (z*100)) ) Haskell.<$> (extractDigits x p)
-                    | (p == 2) =  (\z -> (n*10) + (x - (z*10)) ) Haskell.<$> (extractDigits x p)
-                    | otherwise = Nothing
+extractDigits :: Integer -> Integer -> Integer
+extractDigits x p = if (p == 1) then 
+                       snd $ PlutusTx.Prelude.divMod x 10 -- | (p Haskell.== 1) = Just (snd $ PlutusTx.Prelude.divMod x 10)
+                     else if (p == 9) then
+                       fst $ PlutusTx.Prelude.divMod x 100_000_000
+                     else if (p == 8) then
+                       snd $ PlutusTx.Prelude.divMod (fst $ PlutusTx.Prelude.divMod x 10_000_000) 10
+                     else if (p == 7) then
+                       snd $ PlutusTx.Prelude.divMod (fst $ PlutusTx.Prelude.divMod x 1_000_000) 10
+                     else if (p == 6) then
+                       snd $ PlutusTx.Prelude.divMod (fst $ PlutusTx.Prelude.divMod x 100_000) 10                                              
+                     else if (p == 5) then
+                       snd $ PlutusTx.Prelude.divMod (fst $ PlutusTx.Prelude.divMod x 10_000) 10
+                     else if (p == 4) then
+                       snd $ PlutusTx.Prelude.divMod (fst $ PlutusTx.Prelude.divMod x 1_000) 10                                              
+                     else if (p == 3) then
+                       snd $ PlutusTx.Prelude.divMod (fst $ PlutusTx.Prelude.divMod x 100) 10
+                     else if (p == 2) then
+                       snd $ PlutusTx.Prelude.divMod (fst $ PlutusTx.Prelude.divMod x 10) 10
+                     else
+                       -1000 -- since the maximum value that we compare is only 111, a failure will always result in a number < -1000 
 -- ---------->
 -- R1  R2  R3
 -- 555_555_555
 -- j = [ extractDigits x i | i<- reverse [1..9]]
 
-{-# INLINABLE transposeGrid #-}
-transposeGrid :: [Maybe Integer]-> [Maybe Integer]
-transposeGrid j = foldr (\x y -> (getCol x j) <> y ) []  [0..2]
-                  where
-                    getCol :: Integer -> [Maybe Integer] -> [Maybe Integer]
-                    getCol c k = foldr (\p z -> (take 1 $ Haskell.drop (Haskell.fromIntegral $ c+p) k) <>z) []  [0,3,6] 
 
-{-# INLINABLE checkRowsM #-}
-checkRowsM :: [Maybe Integer] -> Integer -> Bool
-checkRowsM j c = foldl (\x y -> x || y) False [chkRow (i) j | i <- [0,3,6]]
-                  where
-                    chkRow :: Haskell.Int -> [Maybe Integer] -> Bool
-                    chkRow r j = foldr (\x z-> (x==c) && z) True (Data.Maybe.catMaybes $ take 3 $ Haskell.drop r j)
+{-# INLINABLE checkRows #-}
+checkRows :: Integer -> Integer -> Bool
+checkRows x c = let r1 = 100 * (extractDigits x 9 ) + ( 10* (extractDigits x 8)) + (extractDigits x 7)
+                    r2 = 100 * (extractDigits x 6 ) + ( 10* (extractDigits x 5)) + (extractDigits x 4)
+                    r3 = 100 * (extractDigits x 3 ) + ( 10* (extractDigits x 2)) + (extractDigits x 1)
+                in
+                  if (c == 1) then
+                    (r1 == 111) || (r2 == 111) || (r3 == 111)
+                  else if ( c == 0) then
+                    (r1 == 0) || (r2 == 0) || (r3 == 0)
+                  else
+                    False
 
-{-# INLINABLE checkColsM #-}
-checkColsM :: [Maybe Integer] -> Integer -> Bool
-checkColsM j c = flip checkRowsM c $ transposeGrid j
+
+{-# INLINABLE checkCols #-}
+checkCols :: Integer -> Integer -> Bool
+checkCols x c = let c1 = 100 * (extractDigits x 9 ) + ( 10* (extractDigits x 6)) + (extractDigits x 3)
+                    c2 = 100 * (extractDigits x 8 ) + ( 10* (extractDigits x 5)) + (extractDigits x 2)
+                    c3 = 100 * (extractDigits x 7 ) + ( 10* (extractDigits x 4)) + (extractDigits x 1)
+                in
+                  if (c == 1) then
+                    (c1 == 111) || (c2 == 111) || (c3 == 111)
+                  else if ( c == 0) then
+                    (c1 == 0) || (c2 == 0) || (c3 == 0)
+                  else
+                    False
+
+
+{-# INLINABLE checkDiags #-}
+checkDiags :: Integer -> Integer -> Bool
+checkDiags x c = let d1 = 100 * (extractDigits x 9 ) + ( 10* (extractDigits x 5)) + (extractDigits x 1)
+                     d2 = 100 * (extractDigits x 7 ) + ( 10* (extractDigits x 5)) + (extractDigits x 3)
+                 in
+                   if (c == 1) then
+                     (d1 == 111) || (d2 == 111)
+                   else if ( c == 0) then
+                     (d1 == 0) || (d2 == 0)
+                   else
+                     False
 
 
 {-# INLINABLE initGameState #-}
 initGameState :: GameState
 initGameState = GameState 555_555_555
-
--- initGameState = GameState (AssocMap.fromList t)
---               where 
---                   y = (\x -> (("p" Haskell.<> Haskell.show x) <> ) Haskell.<$> ((Haskell.show) Haskell.<$> [1..3::Integer] )) Haskell.<$> [1..3::Integer]
---                   t = zip ((toBuiltin . C.pack) Haskell.<$> (concat y)) (Haskell.take 9 $ Haskell.repeat N)
-
--- {-# INLINABLE getGameStateMap #-}
--- getGameStateMap :: GameState -> (AMap BuiltinByteString GameChoice)
--- getGameStateMap (GameState m) = m 
 
 
 {-# INLINABLE mkValidator #-}
@@ -208,10 +212,14 @@ mkValidator datum redeemer ctx = (traceIfFalse "Deadline expired! (or) Unable to
                                  (traceIfFalse "Wrong game marker selection by the player" evalGameTx ) &&
                                  (traceIfFalse "Player stake does not match" checkGameStake) &&
                                  (traceIfFalse "Wrong Datum" checkCorrectDatum) &&
+                                 (traceIfFalse "Game check failed!!" $ checkGame (gdGameState datum) ) &&
                                  checkMinStake   -- TODO is the minstake is not met give the first player a chance to reclaim the funds from the script                      
     where
 
         --TODO: Check input and output for token in the TX
+        checkGame :: GameState -> Bool
+        checkGame (GameState x) =  checkRows x 1 -- TODO: implement the game checking logic
+
 
         checkDeadline :: Bool
         checkDeadline = contains (to $ tDeadline $ gdGame datum) (txInfoValidRange $ scriptContextTxInfo ctx)
@@ -794,6 +802,18 @@ convLocations2Num loc = Map.lookup loc mapLoc
                     ("p31",3),
                     ("p32",2), 
                     ("p33",1)] 
+
+replaceDigits :: Integer -> Integer -> Integer -> Integer
+replaceDigits x p n | (p == 1) =  (\z -> n + (x - z) ) (extractDigits x p)
+                    | (p == 9) =  (\z -> (n*100_000_000) + (x - (z*100_000_000)) )  (extractDigits x p)
+                    | (p == 8) =  (\z -> (n*10_000_000) + (x - (z*10_000_000)) )  (extractDigits x p)
+                    | (p == 7) =  (\z -> (n*1_000_000) + (x - (z*1_000_000)) )  (extractDigits x p)
+                    | (p == 6) =  (\z -> (n*100_000) + (x - (z*100_000)) )  (extractDigits x p)
+                    | (p == 5) =  (\z -> (n*10_000) + (x - (z*10_000)) )  (extractDigits x p)
+                    | (p == 4) =  (\z -> (n*1_000) + (x - (z*1_000)) )  (extractDigits x p)
+                    | (p == 3) =  (\z -> (n*100) + (x - (z*100)) )  (extractDigits x p)
+                    | (p == 2) =  (\z -> (n*10) + (x - (z*10)) )  (extractDigits x p)
+                    | otherwise = -1000
 
 currSymbol :: CurrencySymbol
 currSymbol = currencySymbol "dcddcaa"
