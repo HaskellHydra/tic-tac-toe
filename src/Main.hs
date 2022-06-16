@@ -183,6 +183,10 @@ checkRowsM j c = foldl (\x y -> x || y) False [chkRow (i) j | i <- [0,3,6]]
                     chkRow :: Haskell.Int -> [Maybe Integer] -> Bool
                     chkRow r j = foldr (\x z-> (x==c) && z) True (Data.Maybe.catMaybes $ take 3 $ Haskell.drop r j)
 
+{-# INLINABLE checkColsM #-}
+checkColsM :: [Maybe Integer] -> Integer -> Bool
+checkColsM j c = flip checkRowsM c $ transposeGrid j
+
 
 {-# INLINABLE initGameState #-}
 initGameState :: GameState
