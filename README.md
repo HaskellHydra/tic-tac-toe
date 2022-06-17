@@ -38,5 +38,5 @@ Cardano smart contract for playing Tic-Tac-Toe
 # Tasks
 
 - [ ] Implement the Off chain code to play the game with correct moves
-- [ ] Implmenet the ON chain code to verify the players moves
+- [x] Implmenet the ON chain code to verify the players moves
 - [ ] Move all the test code into a different file

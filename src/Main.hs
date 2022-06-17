@@ -132,6 +132,20 @@ PlutusTx.unstableMakeIsData ''GameRedeemer
 lovelaces :: Value -> Integer
 lovelaces = Ada.getLovelace . Ada.fromValue
 
+{-# INLINABLE replaceDigits #-}
+replaceDigits :: Integer -> Integer -> Integer -> Integer
+replaceDigits x p n | (p == 1) =  (\z -> n + (x - z) ) (extractDigits x p)
+                    | (p == 9) =  (\z -> (n*100_000_000) + (x - (z*100_000_000)) )  (extractDigits x p)
+                    | (p == 8) =  (\z -> (n*10_000_000) + (x - (z*10_000_000)) )  (extractDigits x p)
+                    | (p == 7) =  (\z -> (n*1_000_000) + (x - (z*1_000_000)) )  (extractDigits x p)
+                    | (p == 6) =  (\z -> (n*100_000) + (x - (z*100_000)) )  (extractDigits x p)
+                    | (p == 5) =  (\z -> (n*10_000) + (x - (z*10_000)) )  (extractDigits x p)
+                    | (p == 4) =  (\z -> (n*1_000) + (x - (z*1_000)) )  (extractDigits x p)
+                    | (p == 3) =  (\z -> (n*100) + (x - (z*100)) )  (extractDigits x p)
+                    | (p == 2) =  (\z -> (n*10) + (x - (z*10)) )  (extractDigits x p)
+                    | otherwise = -1000
+
+
 {-# INLINABLE extractDigits #-}
 extractDigits :: Integer -> Integer -> Integer
 extractDigits x p = if (p == 1) then 
@@ -212,13 +226,9 @@ mkValidator datum redeemer ctx = (traceIfFalse "Deadline expired! (or) Unable to
                                  (traceIfFalse "Wrong game marker selection by the player" evalGameTx ) &&
                                  (traceIfFalse "Player stake does not match" checkGameStake) &&
                                  (traceIfFalse "Wrong Datum" checkCorrectDatum) &&
-                                 (traceIfFalse "Game check failed!!" $ checkGame (gdGameState datum) ) &&
                                  checkMinStake   -- TODO is the minstake is not met give the first player a chance to reclaim the funds from the script                      
     where
 
-        -- TODO: implement the game checking logic        
-        checkGame :: GameState -> Bool
-        checkGame (GameState x) =  True -- checkRows x 1 
 
 
         checkDeadline :: Bool
@@ -230,10 +240,26 @@ mkValidator datum redeemer ctx = (traceIfFalse "Deadline expired! (or) Unable to
 
         evalGameTx :: Bool
         evalGameTx = case redeemer of
-            Play loc c -> checkPlayerChoice c
+            Play loc c -> (checkPlayerChoice c) && (checkGame inGameState redeemer)
             ClaimFirst -> True -- TODO
             ClaimSecond -> True --TODO
             _ -> False
+
+        -- TODO: implement the game checking logic        
+        checkGame :: GameState -> GameRedeemer -> Bool 
+        checkGame gS@(GameState x)  gR@(Play loc c) = let playerChoice = if (c == X) then 1 
+                                                                         else if (c== O) then 0
+                                                                         else traceError "Wrong choice!"
+                                                      in
+                                                        outGameState == (GameState $ expMove playerChoice)  
+                                                        where
+                                                          expMove :: Integer -> Integer
+                                                          expMove playerChoice = if ((extractDigits x loc) == 5 ) then 
+                                                                                   replaceDigits x loc playerChoice
+                                                                                 else 
+                                                                                   traceError "Position is already filled by other player!"
+
+
                               
         checkPlayerChoice :: GameChoice -> Bool
         checkPlayerChoice c =  if (c == X) then
@@ -342,6 +368,13 @@ mkValidator datum redeemer ctx = (traceIfFalse "Deadline expired! (or) Unable to
 
         outGameCfg :: Game
         outGameCfg = gdGame outputDatum
+
+        inGameState :: GameState
+        inGameState = gdGameState datum
+
+        outGameState :: GameState
+        outGameState = gdGameState outputDatum
+
 
                        
         info :: TxInfo    
@@ -544,13 +577,17 @@ playGame MoveParams{..} = do
                          (Just mSndPlayerMarker, Just mSndPlayerPkh) -> d { 
                            gdGame = gdGame { nextMove = mNextMove
                            ,tSecondPlayer = Just (mSndPlayerMarker,mSndPlayerPkh)},
-                           gdGameState =  modGameState gdGameState 4 1
+                           gdGameState =  modGameState gdGameState mChoice
                             } 
 
                          (_, _) -> d { gdGame = gdGame { nextMove = mNextMove} }
                 
-                modGameState :: GameState -> Integer -> Integer -> GameState
-                modGameState (GameState x) p n =  GameState $ replaceDigits x p n
+                modGameState :: GameState -> GameRedeemer -> GameState
+                modGameState (GameState x) (Play loc c)  =  let playerChoice = if (c == X) then 1 
+                                                                               else if (c== O) then 0
+                                                                               else traceError "Wrong choice!"
+                                                            in
+                                                              GameState $ replaceDigits x loc playerChoice
 
 
         r = Redeemer $ PlutusTx.toBuiltinData mChoice 
@@ -741,6 +778,28 @@ myTracePlay = do
       }
     void $ Trace.waitNSlots 1
 
+    Trace.callEndpoint @"test" h1 ()
+    void $ Trace.waitNSlots 1
+
+    -- Make a move first player with stake
+    Trace.callEndpoint @"playGame" h1 $ MoveParams
+      {
+         mFirstPlayerPkh      = mockWalletPaymentPubKeyHash (knownWallet 1)
+        ,mFirstPlayerMarker   = (BuiltinByteString Haskell.. C.pack) "X"
+        ,mSecondPlayerPkh     = Just $ mockWalletPaymentPubKeyHash (knownWallet 2)
+        ,mSecondPlayerMarker  = Just $ (BuiltinByteString Haskell.. C.pack) "O"
+        ,mNextMove            = O        
+        ,mStake               = 10_000_000
+        ,mCurrency            = currSymbol
+        ,mTokenName           = tName
+        ,mState               = initGameState
+        ,mMinGameStake        = minGameStake 
+        ,mChoice              = Play (fromJust $ convLocations2Num "p13") X -- TODO map the poinst p11,p12,.... to positions
+      }
+    void $ Trace.waitNSlots 1
+
+    Trace.callEndpoint @"test" h1 ()
+    void $ Trace.waitNSlots 1
 
 -- test consuming the bounty when the deadline has not been reached
 -- Passing Scenario
@@ -892,18 +951,6 @@ convLocations2Num loc = Map.lookup loc mapLoc
                     ("p31",3),
                     ("p32",2), 
                     ("p33",1)] 
-
-replaceDigits :: Integer -> Integer -> Integer -> Integer
-replaceDigits x p n | (p == 1) =  (\z -> n + (x - z) ) (extractDigits x p)
-                    | (p == 9) =  (\z -> (n*100_000_000) + (x - (z*100_000_000)) )  (extractDigits x p)
-                    | (p == 8) =  (\z -> (n*10_000_000) + (x - (z*10_000_000)) )  (extractDigits x p)
-                    | (p == 7) =  (\z -> (n*1_000_000) + (x - (z*1_000_000)) )  (extractDigits x p)
-                    | (p == 6) =  (\z -> (n*100_000) + (x - (z*100_000)) )  (extractDigits x p)
-                    | (p == 5) =  (\z -> (n*10_000) + (x - (z*10_000)) )  (extractDigits x p)
-                    | (p == 4) =  (\z -> (n*1_000) + (x - (z*1_000)) )  (extractDigits x p)
-                    | (p == 3) =  (\z -> (n*100) + (x - (z*100)) )  (extractDigits x p)
-                    | (p == 2) =  (\z -> (n*10) + (x - (z*10)) )  (extractDigits x p)
-                    | otherwise = -1000
 
 currSymbol :: CurrencySymbol
 currSymbol = currencySymbol "dcddcaa"
