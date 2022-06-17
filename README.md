@@ -40,3 +40,7 @@ Cardano smart contract for playing Tic-Tac-Toe
 - [ ] Implement the Off chain code to play the game with correct moves
 - [x] Implmenet the ON chain code to verify the players moves
 - [ ] Move all the test code into a different file
+
+# TODO
+
+- Fix the log message for expired deadline. If the deadline is expired the script is printing wrong log messages

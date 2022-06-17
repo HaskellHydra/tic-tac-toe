@@ -226,10 +226,9 @@ mkValidator datum redeemer ctx = (traceIfFalse "Deadline expired! (or) Unable to
                                  (traceIfFalse "Wrong game marker selection by the player" evalGameTx ) &&
                                  (traceIfFalse "Player stake does not match" checkGameStake) &&
                                  (traceIfFalse "Wrong Datum" checkCorrectDatum) &&
+                                 (traceIfFalse "Game Won !!" $ not $ winner inGameState) &&
                                  checkMinStake   -- TODO is the minstake is not met give the first player a chance to reclaim the funds from the script                      
     where
-
-
 
         checkDeadline :: Bool
         checkDeadline = contains (to $ tDeadline $ gdGame datum) (txInfoValidRange $ scriptContextTxInfo ctx)
@@ -258,7 +257,14 @@ mkValidator datum redeemer ctx = (traceIfFalse "Deadline expired! (or) Unable to
                                                                                    replaceDigits x loc playerChoice
                                                                                  else 
                                                                                    traceError "Position is already filled by other player!"
-
+                                                          
+        winner :: GameState -> Bool
+        winner gS@(GameState x) = (checkRows x 1) || 
+                                  (checkCols x 1) || 
+                                  (checkDiags x 1)||
+                                  (checkRows x 0) || 
+                                  (checkCols x 0) || 
+                                  (checkDiags x 0)
 
                               
         checkPlayerChoice :: GameChoice -> Bool
@@ -740,6 +746,7 @@ myTracePlay = do
     -- s <- Trace.waitNSlots 1
     void $ Trace.waitNSlots 1
     -- Second player has not joined the game yet.
+    -- 1
     Trace.callEndpoint @"start" h1 $ StartParams
       {
         gFirstPlayerPkh = mockWalletPaymentPubKeyHash (knownWallet 1)
@@ -749,7 +756,7 @@ myTracePlay = do
        ,gNextMove = O
        ,gMinGameStake = minGameStake
        ,gStake = 10_000_000
-       ,gDeadline = slotToBeginPOSIXTime def 10
+       ,gDeadline = slotToBeginPOSIXTime def 20
        ,gCurrency = currSymbol
        ,gTokenName = tName
        ,gState = initGameState
@@ -762,6 +769,7 @@ myTracePlay = do
     void $ Trace.waitNSlots 1
 
     -- Make a move second player with stake
+    -- 2
     Trace.callEndpoint @"playGame" h2 $ MoveParams
       {
          mFirstPlayerPkh      = mockWalletPaymentPubKeyHash (knownWallet 1)
@@ -774,7 +782,7 @@ myTracePlay = do
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play (fromJust $ convLocations2Num "p11") O -- TODO map the poinst p11,p12,.... to positions
+        ,mChoice              = Play (fromJust $ convLocations2Num "p33") O -- TODO map the poinst p11,p12,.... to positions
       }
     void $ Trace.waitNSlots 1
 
@@ -782,6 +790,91 @@ myTracePlay = do
     void $ Trace.waitNSlots 1
 
     -- Make a move first player with stake
+    -- 3
+    Trace.callEndpoint @"playGame" h1 $ MoveParams
+      {
+         mFirstPlayerPkh      = mockWalletPaymentPubKeyHash (knownWallet 1)
+        ,mFirstPlayerMarker   = (BuiltinByteString Haskell.. C.pack) "X"
+        ,mSecondPlayerPkh     = Just $ mockWalletPaymentPubKeyHash (knownWallet 2)
+        ,mSecondPlayerMarker  = Just $ (BuiltinByteString Haskell.. C.pack) "O"
+        ,mNextMove            = O        
+        ,mStake               = 10_000_000
+        ,mCurrency            = currSymbol
+        ,mTokenName           = tName
+        ,mState               = initGameState
+        ,mMinGameStake        = minGameStake 
+        ,mChoice              = Play (fromJust $ convLocations2Num "p11") X -- TODO map the poinst p11,p12,.... to positions
+      }
+    void $ Trace.waitNSlots 1
+
+    Trace.callEndpoint @"test" h1 ()
+    void $ Trace.waitNSlots 1
+
+    -- Make a move second player with stake
+    -- 4
+    Trace.callEndpoint @"playGame" h2 $ MoveParams
+      {
+         mFirstPlayerPkh      = mockWalletPaymentPubKeyHash (knownWallet 1)
+        ,mFirstPlayerMarker   = (BuiltinByteString Haskell.. C.pack) "X"
+        ,mSecondPlayerPkh     = Just $ mockWalletPaymentPubKeyHash (knownWallet 2)
+        ,mSecondPlayerMarker  = Just $ (BuiltinByteString Haskell.. C.pack) "O"
+        ,mNextMove            = X        
+        ,mStake               = 10_000_000
+        ,mCurrency            = currSymbol
+        ,mTokenName           = tName
+        ,mState               = initGameState
+        ,mMinGameStake        = minGameStake 
+        ,mChoice              = Play (fromJust $ convLocations2Num "p31") O -- TODO map the poinst p11,p12,.... to positions
+      }
+    void $ Trace.waitNSlots 1
+
+    Trace.callEndpoint @"test" h1 ()
+    void $ Trace.waitNSlots 1
+
+    -- Make a move first player with stake
+    -- 5
+    Trace.callEndpoint @"playGame" h1 $ MoveParams
+      {
+         mFirstPlayerPkh      = mockWalletPaymentPubKeyHash (knownWallet 1)
+        ,mFirstPlayerMarker   = (BuiltinByteString Haskell.. C.pack) "X"
+        ,mSecondPlayerPkh     = Just $ mockWalletPaymentPubKeyHash (knownWallet 2)
+        ,mSecondPlayerMarker  = Just $ (BuiltinByteString Haskell.. C.pack) "O"
+        ,mNextMove            = O        
+        ,mStake               = 10_000_000
+        ,mCurrency            = currSymbol
+        ,mTokenName           = tName
+        ,mState               = initGameState
+        ,mMinGameStake        = minGameStake 
+        ,mChoice              = Play (fromJust $ convLocations2Num "p12") X -- TODO map the poinst p11,p12,.... to positions
+      }
+    void $ Trace.waitNSlots 1
+
+    Trace.callEndpoint @"test" h1 ()
+    void $ Trace.waitNSlots 1
+
+    -- Make a move second player with stake
+    -- 6
+    Trace.callEndpoint @"playGame" h2 $ MoveParams
+      {
+         mFirstPlayerPkh      = mockWalletPaymentPubKeyHash (knownWallet 1)
+        ,mFirstPlayerMarker   = (BuiltinByteString Haskell.. C.pack) "X"
+        ,mSecondPlayerPkh     = Just $ mockWalletPaymentPubKeyHash (knownWallet 2)
+        ,mSecondPlayerMarker  = Just $ (BuiltinByteString Haskell.. C.pack) "O"
+        ,mNextMove            = X        
+        ,mStake               = 10_000_000
+        ,mCurrency            = currSymbol
+        ,mTokenName           = tName
+        ,mState               = initGameState
+        ,mMinGameStake        = minGameStake 
+        ,mChoice              = Play (fromJust $ convLocations2Num "p32") O -- TODO map the poinst p11,p12,.... to positions
+      }
+    void $ Trace.waitNSlots 1
+
+    Trace.callEndpoint @"test" h1 ()
+    void $ Trace.waitNSlots 1
+
+    -- Make a move first player with stake
+    -- 7
     Trace.callEndpoint @"playGame" h1 $ MoveParams
       {
          mFirstPlayerPkh      = mockWalletPaymentPubKeyHash (knownWallet 1)
@@ -800,6 +893,7 @@ myTracePlay = do
 
     Trace.callEndpoint @"test" h1 ()
     void $ Trace.waitNSlots 1
+
 
 -- test consuming the bounty when the deadline has not been reached
 -- Passing Scenario
