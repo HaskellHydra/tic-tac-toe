@@ -216,9 +216,9 @@ mkValidator datum redeemer ctx = (traceIfFalse "Deadline expired! (or) Unable to
                                  checkMinStake   -- TODO is the minstake is not met give the first player a chance to reclaim the funds from the script                      
     where
 
-        --TODO: Check input and output for token in the TX
+        -- TODO: implement the game checking logic        
         checkGame :: GameState -> Bool
-        checkGame (GameState x) =  checkRows x 1 -- TODO: implement the game checking logic
+        checkGame (GameState x) =  True -- checkRows x 1 
 
 
         checkDeadline :: Bool
@@ -437,6 +437,7 @@ data MoveParams = MoveParams {
 type TicTacToeSchema = Endpoint  "start" StartParams
                        .\/ Endpoint "move" MoveParams
                        .\/ Endpoint "move2" MoveParams
+                       .\/ Endpoint "playGame" MoveParams
                        .\/ Endpoint "moveS" MoveParams
                        .\/ Endpoint "test" ()
 
@@ -528,6 +529,45 @@ mkMoveV2 MoveParams{..} = do
     ledgerTx <- submitTxConstraintsWith lookups tx
     void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
 
+-- TODO : Implement all the correct moves
+playGame :: MoveParams -> Contract w s Text ()
+playGame MoveParams{..} = do
+    logInfo @Haskell.String "-------------- Make a Move ---------------"
+    (oref, o, d@GameDatum{..}) <- findGameDatum mCurrency mTokenName -- We have access to all the records inside d(GameDatum) you can access them directly
+    logInfo @Haskell.String $ printf "Datum from findDatum %s" (Haskell.show $ d)
+    logInfo @Haskell.String $ printf "Using the next move as : %s" (Haskell.show mNextMove)
+    -- logInfo @Haskell.String $ printf "GameState: %s" (Haskell.show (gdGameState) )
+
+    let d' = buildDatum
+          where buildDatum = case (mSecondPlayerMarker, mSecondPlayerPkh) of
+                         
+                         (Just mSndPlayerMarker, Just mSndPlayerPkh) -> d { 
+                           gdGame = gdGame { nextMove = mNextMove
+                           ,tSecondPlayer = Just (mSndPlayerMarker,mSndPlayerPkh)},
+                           gdGameState =  modGameState gdGameState 4 1
+                            } 
+
+                         (_, _) -> d { gdGame = gdGame { nextMove = mNextMove} }
+                
+                modGameState :: GameState -> Integer -> Integer -> GameState
+                modGameState (GameState x) p n =  GameState $ replaceDigits x p n
+
+
+        r = Redeemer $ PlutusTx.toBuiltinData mChoice 
+        v = (Value.singleton mCurrency mTokenName 1) <> (Ada.lovelaceValueOf mStake ) <> (Ada.lovelaceValueOf mStake )
+        -- explained here https://cardano.stackexchange.com/questions/2296/lecture-6-it-2-core-hs-explaining-lookups-use-of-both-typedvalidatorlook
+        lookups = Constraints.typedValidatorLookups ticTacToeInstance Haskell.<> -- used for the output utxo with the new contract instance
+                  Constraints.otherScript validator                   Haskell.<> -- used for consuming the input contract instance
+                  Constraints.unspentOutputs (Map.singleton oref o)
+        tx = Constraints.mustPayToTheScript d' v                            <>
+             Constraints.mustValidateIn (to $ tDeadline gdGame)          <>
+             Constraints.mustSpendScriptOutput oref r
+          
+    logInfo @Haskell.String $ printf "Modified Datum : %s" (Haskell.show d')    
+    ledgerTx <- submitTxConstraintsWith lookups tx
+    void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
+
+
 -- Move to steal the token
 mkMoveS :: MoveParams -> Contract w s Text ()
 mkMoveS MoveParams{..} = do
@@ -614,12 +654,13 @@ test = do
 
 -- | TicTacToe endpoints.
 endpoints :: Contract () TicTacToeSchema Text ()
-endpoints = awaitPromise (start' `select` move' `select` move2' `select` moveS' `select` test') >> endpoints
+endpoints = awaitPromise (start' `select` move' `select` move2' `select` moveS' `select` playGame' `select` test') >> endpoints
   where
     start' = endpoint @"start" start
     move' = endpoint @"move" mkMove
     move2' = endpoint @"move2" mkMoveV2
     moveS' = endpoint @"moveS" mkMoveS
+    playGame' = endpoint @"playGame" playGame
     test' = endpoint @"test" $ const test
 
 -- mkSchemaDefinitions ''TicTacToeSchema
@@ -651,6 +692,55 @@ traceConfig =
   Trace.TraceConfig
     customShowEvent
     stdout
+
+-- test consuming the bounty when the deadline has not been reached
+-- Passing Scenario
+myTracePlay :: Trace.EmulatorTrace ()
+myTracePlay = do
+    h1 <- Trace.activateContractWallet (knownWallet 1) $ endpoints 
+    h2 <- Trace.activateContractWallet (knownWallet 2) $ endpoints 
+    Trace.callEndpoint @"test" h1 ()
+    -- s <- Trace.waitNSlots 1
+    void $ Trace.waitNSlots 1
+    -- Second player has not joined the game yet.
+    Trace.callEndpoint @"start" h1 $ StartParams
+      {
+        gFirstPlayerPkh = mockWalletPaymentPubKeyHash (knownWallet 1)
+       ,gFirstPlayerMarker = (BuiltinByteString Haskell.. C.pack) "X"
+       ,gSecondPlayerPkh = Nothing -- mockWalletPaymentPubKeyHash (knownWallet 2)
+       ,gSecondPlayerMarker = Nothing -- (BuiltinByteString Haskell.. C.pack) "O"
+       ,gNextMove = O
+       ,gMinGameStake = minGameStake
+       ,gStake = 10_000_000
+       ,gDeadline = slotToBeginPOSIXTime def 10
+       ,gCurrency = currSymbol
+       ,gTokenName = tName
+       ,gState = initGameState
+      }
+    -- void $ Trace.waitNSlots 1    
+    s <- Trace.waitNSlots 1
+    Extras.logInfo $ "reached " ++ Haskell.show s
+
+    Trace.callEndpoint @"test" h1 ()
+    void $ Trace.waitNSlots 1
+
+    -- Make a move second player with stake
+    Trace.callEndpoint @"playGame" h2 $ MoveParams
+      {
+         mFirstPlayerPkh      = mockWalletPaymentPubKeyHash (knownWallet 1)
+        ,mFirstPlayerMarker   = (BuiltinByteString Haskell.. C.pack) "X"
+        ,mSecondPlayerPkh     = Just $ mockWalletPaymentPubKeyHash (knownWallet 2)
+        ,mSecondPlayerMarker  = Just $ (BuiltinByteString Haskell.. C.pack) "O"
+        ,mNextMove            = X        
+        ,mStake               = 10_000_000
+        ,mCurrency            = currSymbol
+        ,mTokenName           = tName
+        ,mState               = initGameState
+        ,mMinGameStake        = minGameStake 
+        ,mChoice              = Play (fromJust $ convLocations2Num "p11") O -- TODO map the poinst p11,p12,.... to positions
+      }
+    void $ Trace.waitNSlots 1
+
 
 -- test consuming the bounty when the deadline has not been reached
 -- Passing Scenario
@@ -835,6 +925,11 @@ test1 = Trace.runEmulatorTraceIO' traceConfig emulatorConfig myTraceTest
 -- Failing test
 testS :: IO ()
 testS = Trace.runEmulatorTraceIO' traceConfig emulatorConfig myTraceTestSteal
+
+-- Play test
+testPlay :: IO ()
+testPlay = Trace.runEmulatorTraceIO' traceConfig emulatorConfig myTracePlay
+
 
 
 -- test1 = Trace.runEmulatorTraceIO' def def myTraceTest

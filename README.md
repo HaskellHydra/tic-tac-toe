@@ -34,3 +34,9 @@ Cardano smart contract for playing Tic-Tac-Toe
     - Game choice (either 'X' or 'O' or 'N')
     - Players can claim the reward before the deadline if one of them won the game
     - If the game outcome is **not determined**/**or a tie** before the deadline the funds will be refunded.
+
+# Tasks
+
+- [ ] Implement the Off chain code to play the game with correct moves
+- [ ] Implmenet the ON chain code to verify the players moves
+- [ ] Move all the test code into a different file
