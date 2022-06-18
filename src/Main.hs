@@ -224,9 +224,8 @@ initGameState = GameState 555_555_555
 mkValidator :: GameDatum -> GameRedeemer -> ScriptContext -> Bool
 mkValidator datum redeemer ctx = (traceIfFalse "Deadline expired! (or) Unable to extract datum" checkDeadline) &&
                                  (traceIfFalse "Wrong game marker selection by the player" evalGameTx ) &&
-                                 (traceIfFalse "Player stake does not match" checkGameStake) &&
+                                 (traceIfFalse "Player stake does not match" $ checkGameStake ) && 
                                  (traceIfFalse "Wrong Datum" checkCorrectDatum) &&
-                                 (traceIfFalse "Game Won !!" $ not $ winner inGameState) &&
                                  checkMinStake   -- TODO is the minstake is not met give the first player a chance to reclaim the funds from the script                      
     where
 
@@ -239,9 +238,14 @@ mkValidator datum redeemer ctx = (traceIfFalse "Deadline expired! (or) Unable to
 
         evalGameTx :: Bool
         evalGameTx = case redeemer of
-            Play loc c -> (checkPlayerChoice c) && (checkGame inGameState redeemer)
-            ClaimFirst -> True -- TODO
-            ClaimSecond -> True --TODO
+            Play loc c -> (checkPlayerChoice c) && (checkGame inGameState redeemer) &&
+                          (traceIfFalse "Game Won !!" $ not $ (winner inGameState 1) || (winner inGameState 0) )
+            ClaimFirst -> ( traceIfFalse "Not signed by Player1" $ txSignedBy info $ unPaymentPubKeyHash $ snd $ tFirstPlayer inGameCfg ) && 
+                          ( traceIfFalse "Player1 did not win and hence cannot claim the price." $ winner inGameState 1 )
+            ClaimSecond -> case (tSecondPlayer inGameCfg) of
+                             Nothing -> traceError "Second player details not found!"
+                             Just x -> ( traceIfFalse "Not signed by Player2" $ txSignedBy info $ unPaymentPubKeyHash $ snd x ) && 
+                                       ( traceIfFalse "Player2 did not win and hence cannot claim the price." $ winner inGameState 0 )
             _ -> False
 
         -- TODO: implement the game checking logic        
@@ -258,13 +262,8 @@ mkValidator datum redeemer ctx = (traceIfFalse "Deadline expired! (or) Unable to
                                                                                  else 
                                                                                    traceError "Position is already filled by other player!"
                                                           
-        winner :: GameState -> Bool
-        winner gS@(GameState x) = (checkRows x 1) || 
-                                  (checkCols x 1) || 
-                                  (checkDiags x 1)||
-                                  (checkRows x 0) || 
-                                  (checkCols x 0) || 
-                                  (checkDiags x 0)
+        winner :: GameState -> Integer -> Bool
+        winner gS@(GameState x) c = (checkRows x c) || (checkCols x c) || (checkDiags x c)
 
                               
         checkPlayerChoice :: GameChoice -> Bool
@@ -290,29 +289,41 @@ mkValidator datum redeemer ctx = (traceIfFalse "Deadline expired! (or) Unable to
 ---------------------------------------------------------------------------------------------------------------------------------
 
         checkGameStake :: Bool
-        checkGameStake = case ( tSecondPlayer inGameCfg, tSecondPlayer outGameCfg ) of
+        checkGameStake = case ( redeemer ,tSecondPlayer inGameCfg, tSecondPlayer outGameCfg ) of
             -- When a second player joins a game we need to verify if the player meets the minimum stake
+            -- Also check the initial game state it should match 555_555_555 
             -- and the output TX has a 2*gamestake, In this casse the TX will be signed by the player2 
-                            (Nothing, Just (_, ppkh2)) -> 
+                            (Play _ _, Nothing, Just (_, ppkh2)) -> 
                                 (traceIfFalse "Wrong input values !!!" $ checkInval 1) &&
+                                (traceIfFalse "Initial game state does not match!" $ inGameState == (GameState 555_555_555) ) && -- Player 1 might be cheating
                                 (traceIfFalse "Not signed by player2" $ txSignedBy info $ unPaymentPubKeyHash ppkh2) &&
                                 (traceIfFalse "The second player stake does not match" $ checkOutVal 2 )  --(lovelaces $ txOutValue ownOutput) == 2*(tGameStake outGameCfg) )
             -- In this case only the 1stPlayer stake exists in the script and the second Player has not joined the game yet
             -- This case is not hit, since there is a check to prevent a double move by a player
-                            (Nothing, Nothing) -> 
+                            (Play _ _, Nothing, Nothing) -> 
                                 (traceIfFalse "Wrong input values !!!" $ checkInval 1) &&
                                 (traceIfFalse "Not signed by player1" $ txSignedBy info $ unPaymentPubKeyHash $ snd $ tFirstPlayer outGameCfg ) &&
                                 (traceIfTrue "In checkGameStake" True) &&                               
                                 (traceIfFalse "The First player stake does not match" $  checkOutVal 1 ) -- (lovelaces $ txOutValue ownOutput) == (tGameStake outGameCfg) )
             -- Prevent players from stealing the game stake in the script 
-                            (Just _, Just (_, ppkh2)) -> 
+                            (Play _ _, Just _, Just (_, ppkh2)) -> 
                                 (traceIfFalse "Wrong input values !!!" $ checkInval 2) &&
                                 (traceIfFalse 
                                 "Not signed by any of the players participating in the game" 
                                 $ (txSignedBy info $ unPaymentPubKeyHash $ snd $ tFirstPlayer outGameCfg) || (txSignedBy info $ unPaymentPubKeyHash ppkh2) ) &&
                                 (traceIfFalse "The player stake does not match [Game started with both stakes]" $ checkOutVal 2 ) -- (lovelaces $ txOutValue ownOutput) == 2*(tGameStake outGameCfg) )
+                            (ClaimSecond, Just _, Just (_, ppkh2)) -> 
+                                (traceIfFalse "Wrong input values !!!" $ checkInval 2) &&
+                                (traceIfFalse 
+                                "Not signed by the second player" 
+                                $ (txSignedBy info $ unPaymentPubKeyHash ppkh2) )
+                            (ClaimFirst, Just _, Just (_, ppkh2)) -> 
+                                (traceIfFalse "Wrong input values !!!" $ checkInval 2) &&
+                                (traceIfFalse 
+                                "Not signed by the first player" 
+                                $ (txSignedBy info $ unPaymentPubKeyHash $ snd $ tFirstPlayer outGameCfg)  )
 
-                            (_, _) -> (traceIfFalse "Unknown stake parameters " False) 
+                            (_,_, _) -> (traceIfFalse "Unknown stake parameters " False) 
 
         checkMinStake :: Bool
         checkMinStake = traceIfFalse "Min game stake not met!!" $ (tGameStake outGameCfg) >= minGameStake                           
@@ -400,6 +411,8 @@ mkValidator datum redeemer ctx = (traceIfFalse "Deadline expired! (or) Unable to
         ownOutput   :: TxOut
         outputDatum :: GameDatum
         (ownOutput, outputDatum) = case getContinuingOutputs ctx of
+        -- use the 'getContinuingOutputs' function carefully when the end case happens we need to transfer everything from the script to the winner
+        -- For the close case you need to avoid using this function
             [o] -> case txOutDatumHash o of
                 Nothing   -> traceError "wrong output type"
                 Just h -> case findDatum h info of
@@ -476,6 +489,8 @@ data MoveParams = MoveParams {
 type TicTacToeSchema = Endpoint  "start" StartParams
                        .\/ Endpoint "move" MoveParams
                        .\/ Endpoint "move2" MoveParams
+                       .\/ Endpoint "claimFirst" MoveParams
+                       .\/ Endpoint "claimSnd" MoveParams                       
                        .\/ Endpoint "playGame" MoveParams
                        .\/ Endpoint "moveS" MoveParams
                        .\/ Endpoint "test" ()
@@ -642,6 +657,50 @@ mkMoveS MoveParams{..} = do
     ledgerTx <- submitTxConstraintsWith lookups tx
     void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
 
+claimFirst :: MoveParams -> Contract w s Text ()
+claimFirst MoveParams{..} = do
+    logInfo @Haskell.String "-------------- Claim First ---------------"
+    (oref, o, d@GameDatum{..}) <- findGameDatum mCurrency mTokenName
+    logInfo @Haskell.String $ printf "Datum from findDatum %s" (Haskell.show $ d)    
+
+    let r = Redeemer $ PlutusTx.toBuiltinData mChoice 
+        v = (Value.singleton mCurrency mTokenName 1) <> (Ada.lovelaceValueOf mStake ) <> (Ada.lovelaceValueOf mStake ) -- send everything to the winner
+        -- explained here https://cardano.stackexchange.com/questions/2296/lecture-6-it-2-core-hs-explaining-lookups-use-of-both-typedvalidatorlook
+        lookups = Constraints.typedValidatorLookups ticTacToeInstance Haskell.<> -- used for the output utxo with the new contract instance
+                  Constraints.otherScript validator                   Haskell.<> -- used for consuming the input contract instance
+                  Constraints.unspentOutputs (Map.singleton oref o)
+        tx = Constraints.mustPayToPubKey ( snd $ tFirstPlayer gdGame) v <> -- transfer the token and the stake to player2
+             Constraints.mustValidateIn (to $ tDeadline gdGame)          <>
+             Constraints.mustSpendScriptOutput oref r
+
+    logInfo @Haskell.String $ printf "The value %s has been sent to the Player1" (Haskell.show v)
+    ledgerTx <- submitTxConstraintsWith lookups tx
+    void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
+
+
+claimSnd :: MoveParams -> Contract w s Text ()
+claimSnd MoveParams{..} = do
+    logInfo @Haskell.String "-------------- Claim Second ---------------"
+    (oref, o, d@GameDatum{..}) <- findGameDatum mCurrency mTokenName
+    logInfo @Haskell.String $ printf "Datum from findDatum %s" (Haskell.show $ d)    
+
+    let r = Redeemer $ PlutusTx.toBuiltinData mChoice 
+        v_player = (Ada.lovelaceValueOf mStake ) <> (Ada.lovelaceValueOf mStake ) -- send everything to the winner
+        v_script = (Value.singleton mCurrency mTokenName 1) <> (Ada.lovelaceValueOf 2_000_000 ) -- The on-chain code is making use of continuing script outputs everytime and if script does not hold the token it will fail
+        -- explained here https://cardano.stackexchange.com/questions/2296/lecture-6-it-2-core-hs-explaining-lookups-use-of-both-typedvalidatorlook
+        lookups = Constraints.typedValidatorLookups ticTacToeInstance Haskell.<> -- used for the output utxo with the new contract instance
+                  Constraints.otherScript validator                   Haskell.<> -- used for consuming the input contract instance
+                  Constraints.unspentOutputs (Map.singleton oref o)
+        tx = Constraints.mustPayToPubKey ( snd $ fromJust $ tSecondPlayer gdGame) v_player <> -- transfer the token and the stake to player2
+             Constraints.mustPayToTheScript d v_script                            <>        
+             Constraints.mustValidateIn (to $ tDeadline gdGame)          <>
+             Constraints.mustSpendScriptOutput oref r
+
+    logInfo @Haskell.String $ printf "The value %s has been sent to the Player2" (Haskell.show v_player)
+    ledgerTx <- submitTxConstraintsWith lookups tx
+    void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
+
+
 
 -- Just for testing submit datum with token
 findGameDatum' :: CurrencySymbol -> TokenName -> Contract w s Text (TxOutRef, ChainIndexTxOut, GameDatum)
@@ -697,11 +756,19 @@ test = do
 
 -- | TicTacToe endpoints.
 endpoints :: Contract () TicTacToeSchema Text ()
-endpoints = awaitPromise (start' `select` move' `select` move2' `select` moveS' `select` playGame' `select` test') >> endpoints
+endpoints = awaitPromise (start' `select` 
+                          move' `select` 
+                          move2' `select` 
+                          claimFirst' `select` 
+                          claimSnd' `select` 
+                          moveS' `select` 
+                          playGame' `select` test') >> endpoints
   where
     start' = endpoint @"start" start
     move' = endpoint @"move" mkMove
     move2' = endpoint @"move2" mkMoveV2
+    claimFirst' = endpoint @"claimFirst" claimFirst 
+    claimSnd' = endpoint @"claimSnd" claimSnd     
     moveS' = endpoint @"moveS" mkMoveS
     playGame' = endpoint @"playGame" playGame
     test' = endpoint @"test" $ const test
@@ -873,9 +940,31 @@ myTracePlay = do
     Trace.callEndpoint @"test" h1 ()
     void $ Trace.waitNSlots 1
 
+    -- Uncomment to see the script failur when a player is still trying to make a move after the game has been won.
+    -- -- Make a move first player with stake
+    -- -- 7
+    -- Trace.callEndpoint @"playGame" h1 $ MoveParams
+    --   {
+    --      mFirstPlayerPkh      = mockWalletPaymentPubKeyHash (knownWallet 1)
+    --     ,mFirstPlayerMarker   = (BuiltinByteString Haskell.. C.pack) "X"
+    --     ,mSecondPlayerPkh     = Just $ mockWalletPaymentPubKeyHash (knownWallet 2)
+    --     ,mSecondPlayerMarker  = Just $ (BuiltinByteString Haskell.. C.pack) "O"
+    --     ,mNextMove            = O        
+    --     ,mStake               = 10_000_000
+    --     ,mCurrency            = currSymbol
+    --     ,mTokenName           = tName
+    --     ,mState               = initGameState
+    --     ,mMinGameStake        = minGameStake 
+    --     ,mChoice              = Play (fromJust $ convLocations2Num "p13") X -- TODO map the poinst p11,p12,.... to positions
+    --   }
+    -- void $ Trace.waitNSlots 1
+
+    -- Trace.callEndpoint @"test" h1 ()
+    -- void $ Trace.waitNSlots 1
+
     -- Make a move first player with stake
     -- 7
-    Trace.callEndpoint @"playGame" h1 $ MoveParams
+    Trace.callEndpoint @"claimSnd" h2 $ MoveParams
       {
          mFirstPlayerPkh      = mockWalletPaymentPubKeyHash (knownWallet 1)
         ,mFirstPlayerMarker   = (BuiltinByteString Haskell.. C.pack) "X"
@@ -887,12 +976,14 @@ myTracePlay = do
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play (fromJust $ convLocations2Num "p13") X -- TODO map the poinst p11,p12,.... to positions
+        ,mChoice              = ClaimSecond -- Try to claim the prize
       }
     void $ Trace.waitNSlots 1
 
     Trace.callEndpoint @"test" h1 ()
     void $ Trace.waitNSlots 1
+
+
 
 
 -- test consuming the bounty when the deadline has not been reached
@@ -914,7 +1005,7 @@ myTraceTest = do
        ,gNextMove = O
        ,gMinGameStake = minGameStake
        ,gStake = 10_000_000
-       ,gDeadline = slotToBeginPOSIXTime def 10
+       ,gDeadline = slotToBeginPOSIXTime def 20
        ,gCurrency = currSymbol
        ,gTokenName = tName
        ,gState = initGameState
@@ -927,7 +1018,7 @@ myTraceTest = do
     void $ Trace.waitNSlots 1
 
     -- Make a move second player with stake
-    Trace.callEndpoint @"move2" h2 $ MoveParams
+    Trace.callEndpoint @"playGame" h2 $ MoveParams -- Use playGame endpoint instead of move2
       {
          mFirstPlayerPkh      = mockWalletPaymentPubKeyHash (knownWallet 1)
         ,mFirstPlayerMarker   = (BuiltinByteString Haskell.. C.pack) "X"
@@ -943,7 +1034,7 @@ myTraceTest = do
       }
     void $ Trace.waitNSlots 1
 
-    Trace.callEndpoint @"move2" h1 $ MoveParams
+    Trace.callEndpoint @"move2" h1 $ MoveParams -- This will fail since the game state is not getting changed in this endpoint
       {
          mFirstPlayerPkh      = mockWalletPaymentPubKeyHash (knownWallet 1)
         ,mFirstPlayerMarker   = (BuiltinByteString Haskell.. C.pack) "X"
