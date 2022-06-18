@@ -1,0 +1,23 @@
+Slot 00014: *** CONTRACT LOG: "TX for player 2
+
+
+
+Right (Tx {
+
+txInputs = fromList [
+TxIn {txInRef = TxOutRef {txOutRefId = 3222065e99138d66d8431f6fd494e470b95aaa25581cedce7cbade59ad9157c4, txOutRefIdx = 0}, txInType = Just ConsumePublicKeyAddress},
+TxIn {txInRef = TxOutRef {txOutRefId = 3222065e99138d66d8431f6fd494e470b95aaa25581cedce7cbade59ad9157c4, txOutRefIdx = 1}, txInType = Just (ConsumeScriptAddress Validator { <script> } (Redeemer {getRedeemer = Constr 2 []}) (Datum {getDatum = Constr 0 [Constr 0 [Constr 0 [B \"X\",B \"\\162\\194\\fw\\136z\\206\\FS\\217\\134\\EM>Nu\\186\\189\\137\\147\\207\\213i\\149\\205\\\\\\252\\230\\t\\194\"],Constr 0 [Constr 0 [B \"O\",B \"\\128\\164\\244[V\\184\\141\\DC19\\218#\\188L<u\\236m2\\148<\\b\\DEL%\\v\\134\\EM<\\167\"]],I 10000000,I 10000000,I 1596059111000,Constr 0 [B \"dcddcaa\",B \"T1\"],Constr 0 []],Constr 0 [I 115555000]]}))}
+
+], txCollateral = fromList [TxIn {txInRef = TxOutRef {txOutRefId = 3222065e99138d66d8431f6fd494e470b95aaa25581cedce7cbade59ad9157c4, txOutRefIdx = 0}, txInType = Just ConsumePublicKeyAddress}],
+
+
+
+txOutputs = [
+TxOut {txOutAddress = Address {addressCredential = PubKeyCredential 80a4f45b56b88d1139da23bc4c3c75ec6d32943c087f250b86193ca7, addressStakingCredential = Nothing}, txOutValue = Value (Map [(,Map [(\"\",87950820)])]), txOutDatumHash = Nothing},
+TxOut {txOutAddress = Address {addressCredential = ScriptCredential d909e024ee4ed177cee1ec2b93de9afcf1ca1cb082f3af67ffa6a6e0, addressStakingCredential = Nothing}, txOutValue = Value (Map [(,Map [(\"\",2000000)]),(64636464636161,Map [(\"T1\",1)])]), txOutDatumHash = Just 5b3b53a06a4c34209a6278e9c89b570e9bf76e1e040cd528a7f1bf4ce3535742},
+TxOut {txOutAddress = Address {addressCredential = PubKeyCredential 80a4f45b56b88d1139da23bc4c3c75ec6d32943c087f250b86193ca7, addressStakingCredential = Nothing}, txOutValue = Value (Map [(,Map [(\"\",20000000)])]), txOutDatumHash = Nothing}
+],
+
+
+
+txMint = Value (Map []), txFee = Value (Map [(,Map [(\"\",12295)])]), txValidRange = Interval {ivFrom = LowerBound NegInf True, ivTo = UpperBound (Finite (Slot {getSlot = 20})) False}, txMintScripts = fromList [], txSignatures = fromList [(98c77c40ccc536e0d433874dae97d4a0787b10b3bca0dc2e1bdc7be0a544f0ac,9c063b37fe4fc6e5509ea7ca491501fe49f591b91004e38b221c463a460447454f84e267bec2a338829eb5dd1f61806f9c9f54ab091ef81672d7a4e5af938a0f)], txRedeemers = fromList [], txData = fromList [(5b3b53a06a4c34209a6278e9c89b570e9bf76e1e040cd528a7f1bf4ce3535742,Datum {getDatum = Constr 0 [Constr 0 [Constr 0 [B \"X\",B \"\\162\\194\\fw\\136z\\206\\FS\\217\\134\\EM>Nu\\186\\189\\137\\147\\207\\213i\\149\\205\\\\\\252\\230\\t\\194\"],Constr 0 [Constr 0 [B \"O\",B \"\\128\\164\\244[V\\184\\141\\DC19\\218#\\188L<u\\236m2\\148<\\b\\DEL%\\v\\134\\EM<\\167\"]],I 10000000,I 10000000,I 1596059111000,Constr 0 [B \"dcddcaa\",B \"T1\"],Constr 0 []],Constr 0 [I 115555000]]})]})"
