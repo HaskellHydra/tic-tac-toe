@@ -16,31 +16,50 @@ Cardano smart contract for playing Tic-Tac-Toe
 
 ```
 
-- Create a parameterized contact with the following fields
+## Features of the smart contract
 
-  - ( game choice, pub keys of the player)
-    - the game choice of the player is hardcoded at the begin of the game
-  - game stake
-  - deadline for the game [The game will be valid with the interval]
-  - use a NFT to identify the game
+- The entire game is implemented on-chain and has the following features
 
-- A game is started by one of the player and will be waiting for the other player.
-  - For a given game the parameters for the contract will be fixed. i.e each game will have a unique script address.
-- When a game is started by a player the State of the game will be initiated as follows
-  - `[("p11",N),("p12",N),("p13",N),("p21",N),("p22",N),("p23",N),("p31",N),("p32",N),("p33",N)]`
-- The state of the game is stored in the Datum. The Datum will be carefully updated
-- Players will be able to interact with the game using the Redeemer
-  - The redeemer will contain the following fields
-    - Game choice (either 'X' or 'O' or 'N')
-    - Players can claim the reward before the deadline if one of them won the game
-    - If the game outcome is **not determined**/**or a tie** before the deadline the funds will be refunded.
+  - The on-chain code is capable of determining the winner of the game
+  - It can identify if the game is a tie
+  - The correct game is identified by embedding an NFT in all the script TXs
+  - It can check if a new player (opponent) has joined the game.
+  - It will check the game stake every time you interact with the script
+  - It can check if a player is trying to cheat in the following scenarios
+    - Make a double move
+    - Try to overwrite the existing move
+    - Try to steal the game stake
+  - Can claim the reward before and after the deadline
+  - Can claim your stake if the game is a tie
+  - Can claim back your stake after the deadline if the game is left unfinished.
 
-# Tasks
+## Walkthrough of the game
 
-- [ ] Implement the Off chain code to play the game with correct moves
-- [x] Implmenet the ON chain code to verify the players moves
-- [ ] Move all the test code into a different file
+- Player1 always initiates the game and is given the marker 'X'
 
-# TODO
+  - The state of the game is held in the Datum and is updated carefully
+  - When the game starts, the player will initialize the game with 555_555_555
+  - A check for the initial conditions is set inside the contract and will flag an error if the initial conditions are not met.
+  - Player1 also creates an NFT and sends it to the script initially. The NFT is used for identifying the correct game.
 
-- Fix the log message for expired deadline. If the deadline is expired the script is printing wrong log messages
+- Player2 can join the game if the game is waiting for a new player.
+
+  - After the player2 has joined the game, the script will allow you to update the datum information for player2
+  - Player2 will be given marker 'O'
+
+- When a player wins the game, he can claim the reward immediately without waiting for the deadline to expire.
+
+  - The same thing applies when the game is a tie.
+
+- When the game is unfinished, you need to wait until the deadline has expired to get back your stake.
+
+## Tests
+
+- **testPlay** This will let you run a successful game and claim the reward.
+- **testTie** This will let you run a game that was a tie and then you claim your stake back.
+
+## Known issues
+
+- Currently, the game uses **getContinuingOutputs** always, and the script expects a payment every time. Hence the NFT is stuck in the script at the end.
+  - This function is currently being used for checking the datum.
+  - A workaround can be created by creating a parameterized smart contract and using those parameters in the smart contract.

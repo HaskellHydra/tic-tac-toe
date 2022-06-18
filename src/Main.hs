@@ -65,14 +65,13 @@ minLovelace = 2_000_000
 minGameStake :: Integer
 minGameStake = 10_000_000
 
-data GameChoice = X | O | N
+data GameChoice = X | O 
     deriving (Show, Generic, FromJSON, ToJSON, ToSchema, Haskell.Eq, Haskell.Ord)
 
 instance Eq GameChoice where
     {-# INLINABLE (==) #-}
     X == X = True
     O == O = True
-    N == N = True
     _ == _ = False
 
 PlutusTx.unstableMakeIsData ''GameChoice
