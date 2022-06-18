@@ -149,7 +149,7 @@ replaceDigits x p n | (p == 1) =  (\z -> n + (x - z) ) (extractDigits x p)
 {-# INLINABLE extractDigits #-}
 extractDigits :: Integer -> Integer -> Integer
 extractDigits x p = if (p == 1) then 
-                       snd $ PlutusTx.Prelude.divMod x 10 -- | (p Haskell.== 1) = Just (snd $ PlutusTx.Prelude.divMod x 10)
+                       snd $ PlutusTx.Prelude.divMod x 10 
                      else if (p == 9) then
                        fst $ PlutusTx.Prelude.divMod x 100_000_000
                      else if (p == 8) then
@@ -229,9 +229,9 @@ mkValidator :: GameDatum -> GameRedeemer -> ScriptContext -> Bool
 mkValidator datum redeemer ctx = (traceIfFalse "Wrong game marker selection by the player" evalGameTx ) &&
                                  (traceIfFalse "Player stake does not match" $ checkGameStake ) && 
                                  (traceIfFalse "Wrong Datum" checkCorrectDatum) &&
-                                 checkMinStake   -- TODO is the minstake is not met give the first player a chance to reclaim the funds from the script
+                                 checkMinStake   
                                  -- moved to evalGame 
-                                 -- (traceIfFalse "Deadline expired! (or) Unable to extract datum" checkDeadline) &&
+                                   -- (traceIfFalse "Deadline expired! (or) Unable to extract datum" checkDeadline) &&
     where
 
         checkDeadline :: Bool
@@ -247,6 +247,7 @@ mkValidator datum redeemer ctx = (traceIfFalse "Wrong game marker selection by t
            -- wants to claim after the deadline the script will check if the game was won 
            -- or if its a tie. Depending upon the condition it will 
            -- pay 2*gamestake or just 1*gamestake to the player claiming the prize.
+        -- The below code can be obsoarbed into the checkGameStake 
         evalGameTx :: Bool
         evalGameTx = case redeemer of
             Play loc c -> (traceIfFalse "Its a tie!!" $ not $ checkTie inGameState 9 False ) &&
@@ -254,24 +255,10 @@ mkValidator datum redeemer ctx = (traceIfFalse "Wrong game marker selection by t
                           (traceIfFalse "Deadline expired! (or) Unable to extract datum" checkDeadline) &&
                           (checkPlayerChoice c) && 
                           (checkGame inGameState redeemer)                          
-            ClaimFirst -> True
-            ClaimSecond -> True
+            ClaimFirst -> True -- Setting this True check is being done in the checkGameStake
+            ClaimSecond -> True -- Setting this True check is being done in the checkGameStake
             _ -> False
           
-          -- case redeemer of
-          --   Play loc c -> (checkPlayerChoice c) && (checkGame inGameState redeemer) &&
-          --                 (traceIfFalse "Its a tie!!" $ not $ checkTie inGameState 9 False ) &&
-          --                 (traceIfFalse "Game Won !!" $ not $ (winner inGameState 1) || (winner inGameState 0) ) &&
-          --                 (traceIfFalse "Deadline expired! (or) Unable to extract datum" checkDeadline)
-          --   ClaimFirst -> ( traceIfFalse "Not signed by Player1" $ txSignedBy info $ unPaymentPubKeyHash $ snd $ tFirstPlayer inGameCfg ) && 
-          --                 ( traceIfFalse "Player1 did not win and hence cannot claim the price." $ winner inGameState 1 )
-          --   ClaimSecond -> case (tSecondPlayer inGameCfg) of
-          --                    Nothing -> traceError "Second player details not found!"
-          --                    Just x -> ( traceIfFalse "Not signed by Player2" $ txSignedBy info $ unPaymentPubKeyHash $ snd x ) && 
-          --                              ( traceIfFalse "Player2 did not win and hence cannot claim the price." $ winner inGameState 0 )
-          --   _ -> False
-
-        -- TODO: implement the game checking logic        
         checkGame :: GameState -> GameRedeemer -> Bool 
         checkGame gS@(GameState x)  gR@(Play loc c) = let playerChoice = if (c == X) then 1 
                                                                          else if (c== O) then 0
@@ -417,7 +404,6 @@ mkValidator datum redeemer ctx = (traceIfFalse "Wrong game marker selection by t
         -- TX helper functions
         ------------------------
 
-        --TODO implement a function to check only '1' script input
         getScriptInput :: TxInInfo
         getScriptInput = 
           let xs = [i | i <- txInfoInputs info, Data.Maybe.isJust $ ( txOutDatumHash . txInInfoResolved ) i ]
@@ -482,12 +468,6 @@ mkValidator datum redeemer ctx = (traceIfFalse "Wrong game marker selection by t
                     Nothing -> traceError "game input is missing"
                     Just x -> txInInfoResolved x
 
-        -----------------------------------------
-        -- TODO: In the below code check if 
-        -- the `findDatum h info` is extracting 
-        -- the datum from the output.
-        -----------------------------------------
-
         ownOutput   :: TxOut
         outputDatum :: GameDatum
         (ownOutput, outputDatum) = case getContinuingOutputs ctx of
@@ -502,7 +482,7 @@ mkValidator datum redeemer ctx = (traceIfFalse "Wrong game marker selection by t
                         Nothing  -> traceError "error decoding data"
             _   -> traceError "expected exactly one continuing output"
 
-        -- TODO ownOutput ppkh
+
         ownOutputPpkh :: Maybe PaymentPubKeyHash
         ownOutputPpkh =  PaymentPubKeyHash Haskell.<$> (toPubKeyHash $ txOutAddress ownOutput)
 
@@ -664,7 +644,6 @@ mkMoveV2 MoveParams{..} = do
     ledgerTx <- submitTxConstraintsWith lookups tx
     void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
 
--- TODO : Implement all the correct moves
 playGame :: MoveParams -> Contract w s Text ()
 playGame MoveParams{..} = do
     logInfo @Haskell.String "-------------- Make a Move ---------------"
@@ -961,7 +940,7 @@ myTracePlay = do
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play (fromJust $ convLocations2Num "p33") O -- TODO map the poinst p11,p12,.... to positions
+        ,mChoice              = Play (fromJust $ convLocations2Num "p33") O 
       }
     void $ Trace.waitNSlots 1
 
@@ -982,7 +961,7 @@ myTracePlay = do
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play (fromJust $ convLocations2Num "p11") X -- TODO map the poinst p11,p12,.... to positions
+        ,mChoice              = Play (fromJust $ convLocations2Num "p11") X 
       }
     void $ Trace.waitNSlots 1
 
@@ -1003,7 +982,7 @@ myTracePlay = do
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play (fromJust $ convLocations2Num "p31") O -- TODO map the poinst p11,p12,.... to positions
+        ,mChoice              = Play (fromJust $ convLocations2Num "p31") O 
       }
     void $ Trace.waitNSlots 1
 
@@ -1024,7 +1003,7 @@ myTracePlay = do
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play (fromJust $ convLocations2Num "p12") X -- TODO map the poinst p11,p12,.... to positions
+        ,mChoice              = Play (fromJust $ convLocations2Num "p12") X 
       }
     void $ Trace.waitNSlots 1
 
@@ -1045,7 +1024,7 @@ myTracePlay = do
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play (fromJust $ convLocations2Num "p32") O -- TODO map the poinst p11,p12,.... to positions
+        ,mChoice              = Play (fromJust $ convLocations2Num "p32") O 
       }
     void $ Trace.waitNSlots 1
 
@@ -1068,7 +1047,7 @@ myTracePlay = do
     --     ,mTokenName           = tName
     --     ,mState               = initGameState
     --     ,mMinGameStake        = minGameStake 
-    --     ,mChoice              = Play (fromJust $ convLocations2Num "p13") X -- TODO map the poinst p11,p12,.... to positions
+    --     ,mChoice              = Play (fromJust $ convLocations2Num "p13") X 
     --   }
     -- void $ Trace.waitNSlots 1
 
@@ -1141,7 +1120,7 @@ myTraceTie = do
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play (fromJust $ convLocations2Num "p31") O -- TODO map the poinst p11,p12,.... to positions
+        ,mChoice              = Play (fromJust $ convLocations2Num "p31") O 
       }
     void $ Trace.waitNSlots 1
 
@@ -1162,7 +1141,7 @@ myTraceTie = do
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play (fromJust $ convLocations2Num "p12") X -- TODO map the poinst p11,p12,.... to positions
+        ,mChoice              = Play (fromJust $ convLocations2Num "p12") X 
       }
     void $ Trace.waitNSlots 1
 
@@ -1183,7 +1162,7 @@ myTraceTie = do
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play (fromJust $ convLocations2Num "p32") O -- TODO map the poinst p11,p12,.... to positions
+        ,mChoice              = Play (fromJust $ convLocations2Num "p32") O 
       }
     void $ Trace.waitNSlots 1
 
@@ -1204,7 +1183,7 @@ myTraceTie = do
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play (fromJust $ convLocations2Num "p33") X -- TODO map the poinst p11,p12,.... to positions
+        ,mChoice              = Play (fromJust $ convLocations2Num "p33") X 
       }
     void $ Trace.waitNSlots 1
 
@@ -1225,7 +1204,7 @@ myTraceTie = do
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play (fromJust $ convLocations2Num "p11") O -- TODO map the poinst p11,p12,.... to positions
+        ,mChoice              = Play (fromJust $ convLocations2Num "p11") O 
       }
     void $ Trace.waitNSlots 1
 
@@ -1246,7 +1225,7 @@ myTraceTie = do
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play (fromJust $ convLocations2Num "p21") X -- TODO map the poinst p11,p12,.... to positions
+        ,mChoice              = Play (fromJust $ convLocations2Num "p21") X 
       }
     void $ Trace.waitNSlots 1
 
@@ -1268,7 +1247,7 @@ myTraceTie = do
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play (fromJust $ convLocations2Num "p13") O -- TODO map the poinst p11,p12,.... to positions
+        ,mChoice              = Play (fromJust $ convLocations2Num "p13") O 
       }
     void $ Trace.waitNSlots 1
 
@@ -1289,7 +1268,7 @@ myTraceTie = do
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play (fromJust $ convLocations2Num "p22") X -- TODO map the poinst p11,p12,.... to positions
+        ,mChoice              = Play (fromJust $ convLocations2Num "p22") X 
       }
     void $ Trace.waitNSlots 1
 
@@ -1310,7 +1289,7 @@ myTraceTie = do
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play (fromJust $ convLocations2Num "p23") O -- TODO map the poinst p11,p12,.... to positions
+        ,mChoice              = Play (fromJust $ convLocations2Num "p23") O 
       }
     void $ Trace.waitNSlots 1
 
@@ -1333,7 +1312,7 @@ myTraceTie = do
     --     ,mTokenName           = tName
     --     ,mState               = initGameState
     --     ,mMinGameStake        = minGameStake 
-    --     ,mChoice              = Play (fromJust $ convLocations2Num "p13") X -- TODO map the poinst p11,p12,.... to positions
+    --     ,mChoice              = Play (fromJust $ convLocations2Num "p13") X 
     --   }
     -- void $ Trace.waitNSlots 1
 
@@ -1407,7 +1386,7 @@ myTraceTest = do
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play (fromJust $ convLocations2Num "p11") O -- TODO map the poinst p11,p12,.... to positions
+        ,mChoice              = Play (fromJust $ convLocations2Num "p11") O 
       }
     void $ Trace.waitNSlots 1
 
@@ -1473,7 +1452,7 @@ myTraceTestSteal = do
         ,mTokenName           = tName
         ,mState               = initGameState
         ,mMinGameStake        = minGameStake 
-        ,mChoice              = Play (fromJust $ convLocations2Num "p11") O -- TODO map the poinst p11,p12,.... to positions
+        ,mChoice              = Play (fromJust $ convLocations2Num "p11") O 
       }
     void $ Trace.waitNSlots 1
 
