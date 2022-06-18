@@ -28,7 +28,7 @@ import Data.Map qualified as Map
 import Data.Maybe (catMaybes, fromJust, isJust)
 import Data.Default               (def, Default (..))
 import           Data.Text            (pack, Text)
-import Ledger (Address, dataHash ,Datum (Datum), DatumHash (..), ScriptContext, Validator, Value, getCardanoTxId)
+import Ledger (Address, dataHash ,Datum (Datum), DatumHash (..), ScriptContext, Validator, Value, getCardanoTxId, valuePaidTo)
 import Ledger 
 import Ledger.Value as Value
 import Ledger.Ada qualified as Ada
@@ -115,7 +115,7 @@ data GameDatum = GameDatum {
 
 PlutusTx.unstableMakeIsData ''GameDatum
 
-data GameRedeemer = Play Integer GameChoice | ClaimFirst | ClaimSecond
+data GameRedeemer = Play Integer GameChoice | ClaimFirst | ClaimSecond 
     deriving (Show, Generic, ToJSON, FromJSON, Haskell.Eq)
 
 instance Eq GameRedeemer where
@@ -173,6 +173,10 @@ extractDigits x p = if (p == 1) then
 -- 555_555_555
 -- j = [ extractDigits x i | i<- reverse [1..9]]
 
+{-# INLINABLE checkTie #-} -- None of the positions are a 5
+checkTie :: GameState -> Integer -> Bool -> Bool
+checkTie (GameState x) n t | (n > 0) = checkTie (GameState x) (n-1) ( ((extractDigits x n) == 5) || t )
+               | otherwise = not t
 
 {-# INLINABLE checkRows #-}
 checkRows :: Integer -> Integer -> Bool
@@ -222,11 +226,12 @@ initGameState = GameState 555_555_555
 
 {-# INLINABLE mkValidator #-}
 mkValidator :: GameDatum -> GameRedeemer -> ScriptContext -> Bool
-mkValidator datum redeemer ctx = (traceIfFalse "Deadline expired! (or) Unable to extract datum" checkDeadline) &&
-                                 (traceIfFalse "Wrong game marker selection by the player" evalGameTx ) &&
+mkValidator datum redeemer ctx = (traceIfFalse "Wrong game marker selection by the player" evalGameTx ) &&
                                  (traceIfFalse "Player stake does not match" $ checkGameStake ) && 
                                  (traceIfFalse "Wrong Datum" checkCorrectDatum) &&
-                                 checkMinStake   -- TODO is the minstake is not met give the first player a chance to reclaim the funds from the script                      
+                                 checkMinStake   -- TODO is the minstake is not met give the first player a chance to reclaim the funds from the script
+                                 -- moved to evalGame 
+                                 -- (traceIfFalse "Deadline expired! (or) Unable to extract datum" checkDeadline) &&
     where
 
         checkDeadline :: Bool
@@ -236,10 +241,18 @@ mkValidator datum redeemer ctx = (traceIfFalse "Deadline expired! (or) Unable to
         -- If the second player is nothing both in input and output datums then player 2 did not join the game
           -- The game stake is only 1* gamestake      
 
+
+        -- ClaimFirst and Claim second are idependent of the checkDeadline
+        -- The deadline will be checked in checkGameStake and when a player 
+           -- wants to claim afte the deadline the script will check if the game was won 
+           -- or if its a tie. Depending upon the condition it will 
+           -- pay 2*gamestake or just 1*gamestake to the player claiming the prize.
         evalGameTx :: Bool
         evalGameTx = case redeemer of
             Play loc c -> (checkPlayerChoice c) && (checkGame inGameState redeemer) &&
-                          (traceIfFalse "Game Won !!" $ not $ (winner inGameState 1) || (winner inGameState 0) )
+                          (traceIfFalse "Its a tie!!" $ not $ checkTie inGameState 9 False ) &&
+                          (traceIfFalse "Game Won !!" $ not $ (winner inGameState 1) || (winner inGameState 0) ) &&
+                          (traceIfFalse "Deadline expired! (or) Unable to extract datum" checkDeadline)
             ClaimFirst -> ( traceIfFalse "Not signed by Player1" $ txSignedBy info $ unPaymentPubKeyHash $ snd $ tFirstPlayer inGameCfg ) && 
                           ( traceIfFalse "Player1 did not win and hence cannot claim the price." $ winner inGameState 1 )
             ClaimSecond -> case (tSecondPlayer inGameCfg) of
@@ -313,15 +326,52 @@ mkValidator datum redeemer ctx = (traceIfFalse "Deadline expired! (or) Unable to
                                 $ (txSignedBy info $ unPaymentPubKeyHash $ snd $ tFirstPlayer outGameCfg) || (txSignedBy info $ unPaymentPubKeyHash ppkh2) ) &&
                                 (traceIfFalse "The player stake does not match [Game started with both stakes]" $ checkOutVal 2 ) -- (lovelaces $ txOutValue ownOutput) == 2*(tGameStake outGameCfg) )
                             (ClaimSecond, Just _, Just (_, ppkh2)) -> 
-                                (traceIfFalse "Wrong input values !!!" $ checkInval 2) &&
-                                (traceIfFalse 
-                                "Not signed by the second player" 
-                                $ (txSignedBy info $ unPaymentPubKeyHash ppkh2) )
+                                case ((winner inGameState 0), (checkTie inGameState 9 False),checkDeadline) of
+                                  (True, _, _) -> 
+                                    (traceIfFalse "Wrong input values !!!" $ checkInval 2) &&
+                                    (traceIfFalse 
+                                    "Not signed by the second player" 
+                                    $ (txSignedBy info $ unPaymentPubKeyHash ppkh2) ) &&
+                                    (traceIfFalse "Wrong amount is being paid to the player2" $ checkPlayerOutput (unPaymentPubKeyHash ppkh2) 2)
+                                  (_, True, _) -> 
+                                    -- (traceIfFalse "Wrong input values !!!" $ checkInval 2) && -- input might be 1*gamestake
+                                    (traceIfFalse 
+                                    "Not signed by the second player" 
+                                    $ (txSignedBy info $ unPaymentPubKeyHash ppkh2) ) &&
+                                    (traceIfFalse "Wrong amount is being paid to the player2" $ checkPlayerOutput (unPaymentPubKeyHash ppkh2) 1)
+                                  (False, False, True) ->
+                                    traceError "Cannot claim the prize while the game is in progress!"
+                                  (False, False, False) ->
+                                    (traceIfFalse 
+                                    "Not signed by the second player" 
+                                    $ (txSignedBy info $ unPaymentPubKeyHash ppkh2) ) &&
+                                    (traceIfFalse "Wrong amount is being paid to the player2" $ checkPlayerOutput (unPaymentPubKeyHash ppkh2) 1)
+                                  (_,_,_) ->
+                                    traceError "Unknown state while claiming prize!"
+
                             (ClaimFirst, Just _, Just (_, ppkh2)) -> 
-                                (traceIfFalse "Wrong input values !!!" $ checkInval 2) &&
-                                (traceIfFalse 
-                                "Not signed by the first player" 
-                                $ (txSignedBy info $ unPaymentPubKeyHash $ snd $ tFirstPlayer outGameCfg)  )
+                                case ((winner inGameState 1), (checkTie inGameState 9 False),checkDeadline) of
+                                  (True, _, _) -> 
+                                    (traceIfFalse "Wrong input values !!!" $ checkInval 2) &&
+                                    (traceIfFalse 
+                                    "Not signed by the first player" 
+                                    $ (txSignedBy info $ unPaymentPubKeyHash $ snd $ tFirstPlayer outGameCfg)  ) &&                                
+                                    (traceIfFalse "Wrong amount is being paid to the player1" $ checkPlayerOutput (unPaymentPubKeyHash $ snd $ tFirstPlayer inGameCfg) 2)
+                                  (_, True, _) -> 
+                                    -- (traceIfFalse "Wrong input values !!!" $ checkInval 2) && -- input might be 1*gamestake
+                                    (traceIfFalse 
+                                    "Not signed by the first player" 
+                                    $ (txSignedBy info $ unPaymentPubKeyHash $ snd $ tFirstPlayer outGameCfg)  ) && 
+                                    (traceIfFalse "Wrong amount is being paid to the player1" $ checkPlayerOutput (unPaymentPubKeyHash $ snd $ tFirstPlayer inGameCfg) 1)
+                                  (False, False, True) ->
+                                    traceError "Cannot claim the prize while the game is in progress!"
+                                  (False, False, False) ->
+                                    (traceIfFalse 
+                                    "Not signed by the first player" 
+                                    $ (txSignedBy info $ unPaymentPubKeyHash $ snd $ tFirstPlayer outGameCfg)  ) && 
+                                    (traceIfFalse "Wrong amount is being paid to the player1" $ checkPlayerOutput (unPaymentPubKeyHash $ snd $ tFirstPlayer inGameCfg) 1)
+                                  (_,_,_) ->
+                                    traceError "Unknown state while claiming prize!"
 
                             (_,_, _) -> (traceIfFalse "Unknown stake parameters " False) 
 
@@ -379,6 +429,26 @@ mkValidator datum redeemer ctx = (traceIfFalse "Deadline expired! (or) Unable to
                             curValue = (txOutValue . txInInfoResolved $ getScriptInput)
                         in
                           expValue == curValue
+
+        -- Check how much stake is being paid to the players
+        -- The below function will only check if a output to the ppkh exists 
+          -- Still need to verify if this output is coming from the script
+        checkPlayerOutput :: PubKeyHash -> Integer -> Bool
+        checkPlayerOutput ppkh n = elem (Ada.lovelaceValueOf $ n * (tGameStake inGameCfg)) (pubKeyOutputsAt ppkh info)        
+
+        -- checkPlayerOutput ppkh n = let outputs = txInfoOutputs
+        --                                valHash = ownHash ctx
+        --                            in
+        --                              length (scriptOutputsAt valHash info) == 1
+
+        -- checkPlayerOutput ppkh n = True
+        -- checkPlayerOutput ppkh n = let v = (Ada.getLovelace . Ada.fromValue) (valuePaidTo info ppkh)
+        --                            in
+        --                              v > 1007949476 -- (2 * (tGameStake inGameCfg))
+
+        -- checkPlayerOutput ppkh n = case (pubKeyOutputsAt ppkh info) of
+        --                              [v] -> v == (Ada.lovelaceValueOf $ n * (tGameStake inGameCfg)) 
+        --                              _   -> False
 
         inGameCfg :: Game
         inGameCfg = gdGame datum
@@ -698,6 +768,8 @@ claimSnd MoveParams{..} = do
 
     logInfo @Haskell.String $ printf "The value %s has been sent to the Player2" (Haskell.show v_player)
     ledgerTx <- submitTxConstraintsWith lookups tx
+    logInfo @Haskell.String $ printf "TX for player 2 %s" (Haskell.show ledgerTx)
+    -- logInfo @Haskell.String $ printf "Utxos at player 2 address %s" (Haskell.show $ pubKeyOutputsAt (unPaymentPubKeyHash $ snd $ fromJust $ tSecondPlayer gdGame))    
     void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
 
 
