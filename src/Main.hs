@@ -430,6 +430,9 @@ mkValidator datum redeemer ctx = (traceIfFalse "Wrong game marker selection by t
           -- Still need to verify if this output is coming from the script
         checkPlayerOutput :: PubKeyHash -> Integer -> Bool
         checkPlayerOutput ppkh n = elem (Ada.lovelaceValueOf $ n * (tGameStake inGameCfg)) (pubKeyOutputsAt ppkh info)        
+        -- checkPlayerOutput ppkh n = let v = (Ada.getLovelace . Ada.fromValue) (valuePaidTo info ppkh)
+        --                            in
+        --                              v == (n * (tGameStake inGameCfg))
 
         -- checkPlayerOutput ppkh n = let outputs = txInfoOutputs
         --                                valHash = ownHash ctx
